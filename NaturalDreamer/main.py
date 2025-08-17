@@ -7,9 +7,9 @@ from utils      import loadConfig, seedEverything, plotMetrics
 from envs       import getEnvProperties, GymPixelsProcessingWrapper, CleanGymWrapper
 from utils      import saveLossesToCSV, ensureParentFolders
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
 
-
-def main(configFile):
+def run(configFile):
     config = loadConfig(configFile)
     seedEverything(config.seed)
 
@@ -54,7 +54,11 @@ def main(configFile):
             plotMetrics(f"{metricsFilename}", savePath=f"{plotFilename}", title=f"{config.environmentName}")
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="car-racing-v3.yml")
-    main(parser.parse_args().config)
+    run(parser.parse_args(argv).config)
+
+
+if __name__ == "__main__":
+    main()
