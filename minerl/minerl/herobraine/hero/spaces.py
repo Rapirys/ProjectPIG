@@ -476,7 +476,7 @@ class Text(MineRLSpace):
     MAX_STR_LEN = 100
 
     def __init__(self, shape):
-        super().__init__(shape, np.unicode_)
+        super().__init__(shape, np.str_)
 
     def sample(self):
         total_strings = np.prod(self.shape)
@@ -488,8 +488,8 @@ class Text(MineRLSpace):
 
     def contains(self, x):
         contained = False  # ? TODO (R): Look back in git.
-        contained = contained or isinstance(x, np.ndarray) and x.shape == self.shape and x.dtype.type in [np.string_,
-                                                                                                          np.unicode]
+        contained = contained or isinstance(x, np.ndarray) and x.shape == self.shape and x.dtype.type in [np.bytes_,
+                                                                                                          np.str_]
         contained = contained or self.shape in [None, 1] and isinstance(x, str)
         return contained
 
