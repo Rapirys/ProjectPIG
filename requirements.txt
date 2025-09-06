@@ -1,3 +1,4 @@
+#Natural dreamer
 gymnasium[box2d,other]==1.2.0
 torch==2.8.0
 numpy==2.3.2
@@ -5,3 +6,29 @@ imageio==2.37.0
 pandas==2.3.1
 plotly==6.3.0
 attridict==0.0.9
+
+#Mine RL:
+gym==0.23.1
+opencv-python
+setuptools>=49.2.0
+tqdm>=4.32.2
+requests
+ipython>=7.5.0
+typing>=3.6.6
+lxml>=4.3.3
+psutil>=5.6.2
+Pyro4>=4.76
+getch>=1.0; sys_platform != 'win32' and sys_platform != 'cygwin'
+coloredlogs>=10.0
+pillow>=8.0.0
+dill>=0.3.1.1
+daemoniker>=0.2.3
+xmltodict
+inflection>=0.3.1
+jinja2>=2.11.2
+imagehash>=4.0.0
+flaky
+pyglet
+
+# Compatability with gym
+shimmy[gym-v21]

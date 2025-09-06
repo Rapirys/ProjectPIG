@@ -20,8 +20,6 @@ import shutil
 
 with open("README.md", "r", encoding="utf-8") as fh:
     markdown = fh.read()
-with open("requirements.txt", "r", encoding="utf-8") as fh:
-    requirements = fh.read()
 
 MALMO_BRANCH = "minerl"
 MALMO_VERSION = "0.37.0"
@@ -236,7 +234,6 @@ setuptools.setup(
         "Programming Language :: Python :: 3",
         "Operating System :: OS Independent",
     ],
-    install_requires=requirements,
     distclass=BinaryDistribution,
     include_package_data=True,
     cmdclass=cmdclass,

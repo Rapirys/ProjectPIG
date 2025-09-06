@@ -4,16 +4,24 @@ from torch.distributions import kl_divergence, Independent, OneHotCategoricalStr
 import numpy as np
 import os
 
-from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, ContinueModel, EncoderConv, DecoderConv, Actor, Critic
+from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, ContinueModel, EncoderConv, DecoderConv, Actor, Critic, \
+    HybridActor
 from utils import computeLambdaValues, Moments
 from buffer import ReplayBuffer
 import imageio
 
 
 class Dreamer:
-    def __init__(self, observationShape, actionSize, actionLow, actionHigh, device, config):
+    # TODO rename disc_n, cont_dim
+    def __init__(self, observationShape, disc_segments, continuous, device, config):
         self.observationShape   = observationShape
-        self.actionSize         = actionSize
+        cont_dim, actionLow, actionHigh = continuous
+
+        self.disc_segments = list(disc_segments)
+        self.actionContDim = cont_dim
+        self.actionDiscDim = sum(self.disc_segments)
+        self.actionSize    = self.actionContDim + self.actionDiscDim
+
         self.config             = config
         self.device             = device
 
@@ -21,18 +29,19 @@ class Dreamer:
         self.latentSize     = config.latentLength*config.latentClasses
         self.fullStateSize  = config.recurrentSize + self.latentSize
 
-        self.actor           = Actor(self.fullStateSize, actionSize, actionLow, actionHigh, device,                                  config.actor          ).to(self.device)
+        self.actor = HybridActor(self.fullStateSize, cont_dim, actionLow, actionHigh,
+                                 self.disc_segments, device, config.actor).to(self.device)
         self.critic          = Critic(self.fullStateSize,                                                                            config.critic         ).to(self.device)
         self.encoder         = EncoderConv(observationShape, self.config.encodedObsSize,                                             config.encoder        ).to(self.device)
         self.decoder         = DecoderConv(self.fullStateSize, observationShape,                                                     config.decoder        ).to(self.device)
-        self.recurrentModel  = RecurrentModel(config.recurrentSize, self.latentSize, actionSize,                                     config.recurrentModel ).to(self.device)
+        self.recurrentModel  = RecurrentModel(config.recurrentSize, self.latentSize, self.actionSize,                                     config.recurrentModel ).to(self.device)
         self.priorNet        = PriorNet(config.recurrentSize, config.latentLength, config.latentClasses,                             config.priorNet       ).to(self.device)
         self.posteriorNet    = PosteriorNet(config.recurrentSize + config.encodedObsSize, config.latentLength, config.latentClasses, config.posteriorNet   ).to(self.device)
         self.rewardPredictor = RewardModel(self.fullStateSize,                                                                       config.reward         ).to(self.device)
         if config.useContinuationPrediction:
             self.continuePredictor  = ContinueModel(self.fullStateSize,                                                              config.continuation   ).to(self.device)
 
-        self.buffer         = ReplayBuffer(observationShape, actionSize, config.buffer, device)
+        self.buffer         = ReplayBuffer(observationShape, self.actionSize, config.buffer, device)
         self.valueMoments   = Moments(device)
 
         self.worldModelParameters = (list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.recurrentModel.parameters()) +
@@ -48,6 +57,12 @@ class Dreamer:
         self.totalEnvSteps      = 0
         self.totalGradientSteps = 0
 
+    def _flat_action(self, a: dict):
+        # TODO Review if there a better place
+        parts = []
+        if "control" in a: parts.append(a["control"])
+        if "macro"   in a: parts.append(a["macro"])
+        return torch.cat(parts, -1) if parts else None
 
     def worldModelTraining(self, data):
         encodedObservations = self.encoder(data.observations.view(-1, *self.observationShape)).view(self.config.batchSize, self.config.batchLength, -1)
@@ -97,6 +112,7 @@ class Dreamer:
         worldModelLoss =  reconstructionLoss + rewardLoss + klLoss # I think that the reconstruction loss is relatively a bit too high (11k) 
         
         if self.config.useContinuationPrediction:
+            # TODO The useContinuationPrediction possibly will not work
             continueDistribution = self.continuePredictor(fullStates)
             continueLoss         = nn.BCELoss(continueDistribution.probs, 1 - data.dones[:, 1:])
             worldModelLoss      += continueLoss.mean()
@@ -119,8 +135,8 @@ class Dreamer:
         recurrentState, latentState = torch.split(fullState, (self.recurrentSize, self.latentSize), -1)
         fullStates, logprobs, entropies = [], [], []
         for _ in range(self.config.imaginationHorizon):
-            action, logprob, entropy = self.actor(fullState.detach(), training=True)
-            recurrentState = self.recurrentModel(recurrentState, latentState, action)
+            actionFlat, logprob, entropy = self.actor(fullState.detach(), training=True)
+            recurrentState = self.recurrentModel(recurrentState, latentState, actionFlat)
             latentState, _ = self.priorNet(recurrentState)
 
             fullState = torch.cat((recurrentState, latentState), -1)
@@ -168,23 +184,25 @@ class Dreamer:
     def environmentInteraction(self, env, numEpisodes, seed=None, evaluation=False, saveVideo=False, filename="videos/unnamedVideo", fps=30, macroBlockSize=16):
         scores = []
         for i in range(numEpisodes):
-            recurrentState, latentState = torch.zeros(1, self.recurrentSize, device=self.device), torch.zeros(1, self.latentSize, device=self.device)
-            action = torch.zeros(1, self.actionSize).to(self.device)
+            recurrentState = torch.zeros(1, self.recurrentSize, device=self.device)
+            latentState    = torch.zeros(1, self.latentSize,    device=self.device)
+            prevActionVec  = torch.zeros(1, self.actionSize,    device=self.device)
 
             observation = env.reset(seed= (seed + self.totalEpisodes if seed else None))
             encodedObservation = self.encoder(torch.from_numpy(observation).float().unsqueeze(0).to(self.device))
 
             currentScore, stepCount, done, frames = 0, 0, False, []
             while not done:
-                recurrentState      = self.recurrentModel(recurrentState, latentState, action)
-                latentState, _      = self.posteriorNet(torch.cat((recurrentState, encodedObservation.view(1, -1)), -1))
+                recurrentState = self.recurrentModel(recurrentState, latentState, prevActionVec)
+                latentState, _ = self.posteriorNet(torch.cat((recurrentState, encodedObservation.view(1, -1)), -1))
 
-                action          = self.actor(torch.cat((recurrentState, latentState), -1))
-                actionNumpy     = action.cpu().numpy().reshape(-1)
+                actionFlat, _, _ = self.actor(torch.cat((recurrentState, latentState), -1))
+                nextObservation, reward, done = env.step(actionFlat.cpu().numpy().reshape(-1))
+                # env.render()  # TODO remove
+                prevActionVec = actionFlat
 
-                nextObservation, reward, done = env.step(actionNumpy)
                 if not evaluation:
-                    self.buffer.add(observation, actionNumpy, reward, nextObservation, done)
+                    self.buffer.add(observation, prevActionVec.cpu().numpy().reshape(-1), reward, nextObservation, done)
 
                 if saveVideo and i == 0:
                     frame = env.render()

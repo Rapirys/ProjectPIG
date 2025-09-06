@@ -4,7 +4,7 @@ import argparse
 import os
 from dreamer    import Dreamer
 from utils      import loadConfig, seedEverything, plotMetrics
-from envs       import getEnvProperties, GymPixelsProcessingWrapper, CleanGymWrapper
+from envs import getEnvProperties, GymPixelsProcessingWrapper, CleanGymWrapper, make_env
 from utils      import saveLossesToCSV, ensureParentFolders
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
@@ -20,25 +20,29 @@ def run(configFile):
     checkpointFilenameBase  = os.path.join(config.folderNames.checkpointsFolder,    runName)
     videoFilenameBase       = os.path.join(config.folderNames.videosFolder,         runName)
     ensureParentFolders(metricsFilename, plotFilename, checkpointFilenameBase, videoFilenameBase)
-    
-    env             = CleanGymWrapper(GymPixelsProcessingWrapper(gym.wrappers.ResizeObservation(gym.make(config.environmentName), (64, 64))))
-    envEvaluation   = CleanGymWrapper(GymPixelsProcessingWrapper(gym.wrappers.ResizeObservation(gym.make(config.environmentName, render_mode="rgb_array"), (64, 64))))
-    
-    observationShape, actionSize, actionLow, actionHigh = getEnvProperties(env)
-    print(f"envProperties: obs {observationShape}, action size {actionSize}, actionLow {actionLow}, actionHigh {actionHigh}")
 
-    dreamer = Dreamer(observationShape, actionSize, actionLow, actionHigh, device, config.dreamer)
+    env, envEvaluation = make_env(config.environmentName)
+
+    observationShape, disc_n, (cont_dim, actionLow, actionHigh) = getEnvProperties(env)
+    print(f"envProperties: obs {observationShape}, cont {cont_dim}, disc {disc_n}")
+
+    dreamer = Dreamer(observationShape, disc_n, (cont_dim, actionLow, actionHigh), device, config.dreamer)
     if config.resume:
         dreamer.loadCheckpoint(checkpointToLoad)
 
     dreamer.environmentInteraction(env, config.episodesBeforeStart, seed=config.seed)
+    dreamer.environmentInteraction(env, config.episodesBeforeStart, seed=config.seed)
+    dreamer.environmentInteraction(env, config.episodesBeforeStart, seed=config.seed)
+    dreamer.environmentInteraction(env, config.episodesBeforeStart, seed=config.seed)
+    dreamer.environmentInteraction(env, config.episodesBeforeStart, seed=config.seed)
+
 
     iterationsNum = config.gradientSteps // config.replayRatio
     for _ in range(iterationsNum):
         for _ in range(config.replayRatio):
-            sampledData                         = dreamer.buffer.sample(dreamer.config.batchSize, dreamer.config.batchLength)
-            initialStates, worldModelMetrics    = dreamer.worldModelTraining(sampledData)
-            behaviorMetrics                     = dreamer.behaviorTraining(initialStates)
+            sampledData                      = dreamer.buffer.sample(dreamer.config.batchSize, dreamer.config.batchLength)
+            initialStates, worldModelMetrics = dreamer.worldModelTraining(sampledData)
+            behaviorMetrics                  = dreamer.behaviorTraining(initialStates)
             dreamer.totalGradientSteps += 1
 
             if dreamer.totalGradientSteps % config.checkpointInterval == 0 and config.saveCheckpoints:
@@ -56,7 +60,8 @@ def run(configFile):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="car-racing-v3.yml")
+    # parser.add_argument("--config", type=str, default="car-racing-v3.yml")
+    parser.add_argument("--config", type=str, default="mine-rl")
     run(parser.parse_args(argv).config)
 
 

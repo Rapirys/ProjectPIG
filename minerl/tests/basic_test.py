@@ -5,11 +5,14 @@ from minerl.herobraine.env_specs.human_survival_specs import HumanSurvival
 import coloredlogs
 coloredlogs.install(logging.DEBUG)
 
-def test_turn(resolution):
-    #env = HumanSurvival(resolution=resolution).make()
+def test_turn():
+    resolution = (640, 360)
+    # env = HumanSurvival(resolution=resolution).make()
     #env = gym.make("MineRLBasaltBuildVillageHouse-v0")
-    env = gym.make("MineRLObtainDiamondShovel-v0")
-    #env = gym.make("MineRLBasaltFindCave-v0")
+    # env = gym.make("MineRLObtainDiamondShovel-v0")
+    # env = gym.make("MineRLBasaltFindCave-v0")
+    env = gym.make("MineRLNavigateDense-v0")
+
     env.reset()
     _, _, _, info = env.step(env.action_space.noop())
     N = 100
@@ -21,7 +24,7 @@ def test_turn(resolution):
     env.close()
 
 if __name__ == '__main__':
-    test_turn((640, 360))
+    test_turn()
 
 
 

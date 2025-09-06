@@ -15,11 +15,12 @@ buildscript {
     }
     dependencies {
         classpath 'org.ow2.asm:asm:6.0'
-        classpath('com.github.SpongePowered:MixinGradle:dcfaf61'){ // 0.6
-            // Because forgegradle requires 6.0 (not -debug-all) while mixingradle depends on 5.0
-            // and putting mixin right here will place it before forge in the class loader
-            exclude group: 'org.ow2.asm', module: 'asm-debug-all'
-        }
+//        classpath('com.github.SpongePowered:MixinGradle:dcfaf61'){ // 0.6
+//            // Because forgegradle requires 6.0 (not -debug-all) while mixingradle depends on 5.0
+//            // and putting mixin right here will place it before forge in the class loader
+//            exclude group: 'org.ow2.asm', module: 'asm-debug-all'
+//        }
+        classpath fileTree('/home/rapirys/PycharmProjects/minedojo/MineDojo/MixinGradle-dcfaf61.jar')
         classpath 'net.minecraftforge.gradle:ForgeGradle:2.2-SNAPSHOT'
     }
 }
@@ -60,9 +61,9 @@ archivesBaseName = "MalmoMod"
 
 
 minecraft {
-    version = "1.11.2-13.20.0.2228"
+    version = "1.11.2-13.20.1.2588"
     runDir = "run"
-    
+
     // the mappings can be changed at any time, and must be in the following format.
     // snapshot_YYYYMMDD   snapshot are built nightly.
     // stable_#            stables are built at the discretion of the MCP team.
@@ -73,7 +74,7 @@ minecraft {
 }
 
 
-runClient { 
+runClient {
     if (project.hasProperty("runDir")) {
         minecraft.runDir = project.getProperty("runDir")
     }
