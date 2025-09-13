@@ -15,7 +15,7 @@ numInteractionEpisodes: 1
 numEvaluationEpisodes: 1
 
 dreamer:
-  batchSize: 32
+  batchSize: 64
   batchLength: 64
   imaginationHorizon: 32
 
@@ -90,7 +90,7 @@ dreamer:
     activation: Tanh
 
 folderNames:
-  metricsFolder: metrics
-  plotsFolder: plots
-  checkpointsFolder: checkpoints
-  videosFolder: videos
+  metricsFolder: /content/drive/MyDrive/NaturalDreamer/metrics
+  plotsFolder: /content/drive/MyDrive/NaturalDreamer/plots
+  checkpointsFolder: /content/drive/MyDrive/NaturalDreamer/checkpoints
+  videosFolder: /content/drive/MyDrive/NaturalDreamer/videos
