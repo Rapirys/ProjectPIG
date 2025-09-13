@@ -4,7 +4,7 @@
   </About>
 
   <ModSettings>
-      <MsPerTick>50</MsPerTick>
+      <MsPerTick>5</MsPerTick>
   </ModSettings>
 
   <ServerSection>
@@ -59,7 +59,7 @@
         <Width>320</Width>
         <Height>240</Height>
       </VideoProducer>
-      <ObservationFromFullStats />
+<!--      <ObservationFromFullStats />-->
       <ContinuousMovementCommands turnSpeedDegs="180">
         <ModifierList type="allow-list">
           <command>move</command>

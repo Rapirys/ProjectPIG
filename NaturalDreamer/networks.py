@@ -129,9 +129,9 @@ class Actor(nn.Module):
         self.config = config
         self.network = sequentialModel1D(inputSize, [self.config.hiddenSize]*self.config.numLayers, actionSize, self.config.activation)
         self.register_buffer("actionScale", ((torch.tensor(actionHigh, device=device) - torch.tensor(actionLow, device=device)) / 2.0))
-        self.register_buffer("actionBias", ((torch.tensor(actionHigh, device=device) + torch.tensor(actionLow, device=device)) / 2.0))
+        self.register_buffer("actionBias",  ((torch.tensor(actionHigh, device=device) + torch.tensor(actionLow, device=device)) / 2.0))
 
-    def forward(self, x, training=False):
+    def forward(self, x):
         logStdMin, logStdMax = -5, 2
         mean, logStd = self.network(x).chunk(2, dim=-1)
         logStd = logStdMin + (logStdMax - logStdMin)/2*(torch.tanh(logStd) + 1) # (-1, 1) to (min, max)
@@ -141,13 +141,63 @@ class Actor(nn.Module):
         sample = distribution.sample()
         sampleTanh = torch.tanh(sample)
         action = sampleTanh*self.actionScale + self.actionBias
-        if training:
-            logprobs = distribution.log_prob(sample)
-            logprobs -= torch.log(self.actionScale*(1 - sampleTanh.pow(2)) + 1e-6)
-            entropy = distribution.entropy()
-            return action, logprobs.sum(-1), entropy.sum(-1)
-        else:
-            return action
+
+        logprobs = distribution.log_prob(sample)
+        logprobs -= torch.log(self.actionScale*(1 - sampleTanh.pow(2)) + 1e-6)
+        entropy = distribution.entropy()
+        return action, logprobs.sum(-1), entropy.sum(-1)
+
+
+class DiscreteActor(nn.Module):
+    # TODO review DiscreteActor logick
+    def __init__(self, inputSize, segments, device, config):
+        super().__init__()
+        self.config   = config
+        self.segments = list(segments)
+        self.total    = sum(self.segments)
+        self.network  = sequentialModel1D(inputSize,
+                           [self.config.hiddenSize]*self.config.numLayers,
+                           self.total, self.config.activation)
+
+    def forward(self, x):
+        logits = self.network(x)                           # shape: (B, total)
+        parts  = torch.split(logits, self.segments, dim=-1)  # list of (B, n_i)
+
+        samples, logps, ents = [], [], []
+        for p in parts:
+            base = OneHotCategoricalStraightThrough(logits=p)  # each key
+            s = base.rsample()                                  # (B, n_i), one-hot
+            samples.append(s)
+            logps.append(base.log_prob(s))                      # (B,)
+            ents.append(base.entropy())                         # (B,)
+
+        action  = torch.cat(samples, dim=-1)                    # (B, total)
+        logprob = torch.stack(logps, dim=-1).sum(dim=-1)        # (B,)
+        entropy = torch.stack(ents,  dim=-1).sum(dim=-1)        # (B,)
+        return action, logprob, entropy
+
+
+        
+class HybridActor(nn.Module):
+    def __init__(self, inputSize, cont_dim, cont_low, cont_high, disc_segments, device, config):
+        super().__init__()
+        self.cont = Actor(inputSize, cont_dim, cont_low, cont_high, device, config) if cont_dim > 0 else None
+        self.disc = DiscreteActor(inputSize, disc_segments, device, config)          if sum(disc_segments) > 0 else None
+    #     TODO Avoid setting to NONE
+
+    def forward(self, x, training=False):
+        heads = [m for m in (self.cont, self.disc) if m is not None]
+
+        actions, logprobs, entropy = [], 0, 0
+        for head in heads:
+            a, lp, en = head(x)  #DODO
+            actions.append(a)
+            logprobs += lp
+            entropy += en
+
+        flat_actions = torch.cat(actions, -1)
+        return flat_actions, logprobs, entropy
+
 
 
 class Critic(nn.Module):
