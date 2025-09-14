@@ -144,7 +144,7 @@ def make_env(config):
         base = malmoenv.make()
         base.init(
             xml,
-            9000,
+            10000,
             server="127.0.0.1",
             server2=None,
             port2=None,  #
