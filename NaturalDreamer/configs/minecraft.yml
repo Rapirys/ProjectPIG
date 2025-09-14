@@ -6,7 +6,7 @@ gradientSteps: 60000
 replayRatio: 200
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
-checkpointInterval: 1000
+checkpointInterval: 500
 resume: False
 checkpointToLoad: 50k
 
@@ -17,7 +17,7 @@ numEvaluationEpisodes: 1
 dreamer:
   batchSize: 32
   batchLength: 64
-  imaginationHorizon: 32
+  imaginationHorizon: 15
 
   recurrentSize: 512 #1024*8
   latentLength: 16 #32

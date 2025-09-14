@@ -7,3 +7,4 @@ plotly==6.3.0
 attridict==0.0.9
 lxml
 pillow
+tqdm

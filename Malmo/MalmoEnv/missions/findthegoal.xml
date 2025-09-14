@@ -44,7 +44,7 @@
           <hintLikelihood>1</hintLikelihood>
         </specification>
       </ClassroomDecorator>
-      <ServerQuitFromTimeUp timeLimitMs="12000" description="out_of_time"/>
+      <ServerQuitFromTimeUp timeLimitMs="30000" description="out_of_time"/>
       <ServerQuitWhenAnyAgentFinishes />
     </ServerHandlers>
   </ServerSection>
