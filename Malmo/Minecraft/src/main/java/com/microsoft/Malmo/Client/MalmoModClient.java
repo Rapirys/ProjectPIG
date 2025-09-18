@@ -19,8 +19,12 @@
 
 package com.microsoft.Malmo.Client;
 
+import net.minecraft.client.gui.GuiGameOver;
+import net.minecraftforge.fml.common.eventhandler.Event;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import org.lwjgl.input.Mouse;
 
@@ -28,14 +32,29 @@ import com.microsoft.Malmo.Utils.CraftingHelper;
 import com.microsoft.Malmo.Utils.ScreenHelper.TextCategory;
 import com.microsoft.Malmo.Utils.TextureHelper;
 
+import net.minecraft.block.BlockContainer;
+import net.minecraft.block.BlockWorkbench;
+import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.settings.GameSettings;
+import net.minecraft.entity.item.EntityMinecartCommandBlock;
+import net.minecraft.entity.item.EntityMinecartContainer;
+import net.minecraft.entity.passive.EntityVillager;
 import net.minecraft.util.MouseHelper;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.RayTraceResult;
+import net.minecraftforge.client.event.GuiOpenEvent;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
+import net.minecraftforge.fml.common.eventhandler.EventPriority;
+import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
+import net.minecraftforge.fml.relauncher.Side;
+import net.minecraftforge.fml.relauncher.SideOnly;
 
 public class MalmoModClient
 {
+    
     public interface MouseEventListener
     {
         public void onXYZChange(int deltaX, int deltaY, int deltaZ);
@@ -178,28 +197,63 @@ public class MalmoModClient
             @Override
             public void onPressed()
             {
+                // TODO (R): This is a really janky way of extracting constants. This should 
+                // just happen from the command line. -_-
                 // Use this if you want to test some code with a handy key press
-                try
-                {
-                    CraftingHelper.dumpRecipes("recipe_dump.txt");
-                }
-                catch (IOException e)
-                {
-                    e.printStackTrace();
-                }
+                CraftingHelper.dumpMinecraftObjectRules("../../../herobraine/hero/mc_constants.json");
             }
         });
         this.keyManager = new KeyManager(settings, extraKeys);
     }
-    
-    /*
+
+    /**
+     * Event listener that prevents agents from opening gui windows by canceling the 'USE' action of a block
+     * deny (most) blocks that open a gui when {@link net.minecraft.block.Block#onBlockActivated} is called
+     * @param event the captured event
+     */
     @SideOnly(Side.CLIENT)
-    @SubscribeEvent
-    public void onEvent(GuiOpenEvent event)
-    {
-        if (event.getGui() instanceof GuiIngameModOptions)
-        {
-            event.setGui(new MalmoModGuiOptions.MalmoModGuiScreen(null));
+    @SubscribeEvent(priority = EventPriority.HIGH)
+    public void onRightClickEvent(PlayerInteractEvent.RightClickBlock event){
+        if(this.stateMachine.getStableState() == ClientState.RUNNING){
+            Logger logger = Logger.getLogger("MalmoModClient.onRightClickEvent");
+            Minecraft mc = Minecraft.getMinecraft();
+            if (mc.objectMouseOver.typeOfHit.equals(RayTraceResult.Type.BLOCK)) {
+                BlockPos blockpos = mc.objectMouseOver.getBlockPos();
+                IBlockState blockState = mc.world.getBlockState(blockpos);
+                if (blockState.getBlock() instanceof BlockContainer
+                || blockState.getBlock() instanceof BlockWorkbench){
+                    event.setUseBlock(Event.Result.DENY);
+                    logger.log(Level.INFO, "Denied usage of " + blockState.getBlock().getRegistryName().toString());
+                }
+            } else if (mc.objectMouseOver.typeOfHit.equals(RayTraceResult.Type.ENTITY)) {
+                // This does not seem to be possible given the case logic in Minecraft.java @ line 1585
+                // Included here in the event objectMouseOver changes between these cases
+                if (mc.objectMouseOver.entityHit instanceof EntityVillager
+                || mc.objectMouseOver.entityHit instanceof EntityMinecartContainer
+                || mc.objectMouseOver.entityHit instanceof EntityMinecartCommandBlock) {
+                    event.setUseBlock(Event.Result.DENY);
+                    logger.log(Level.SEVERE, "Denied usage of " + mc.objectMouseOver.entityHit.getName() + "! This" +
+                            "is not expected to happen!");
+                }
+
+            }
         }
-    }*/
+    }
+
+    /**
+     * Event listener that logs when agents open gui windows
+     * @param event the captured event
+     */
+    @SideOnly(Side.CLIENT)
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public void onGuiOpenEvent(GuiOpenEvent event){
+        if(this.stateMachine.getStableState() == ClientState.RUNNING){
+            Logger logger = Logger.getLogger("MalmoModClient.onGuiOpenEvent");
+            if (event != null && event.getGui() != null && !(event.getGui() instanceof GuiGameOver)) {
+                logger.log(Level.WARNING, "GUI Window " + event.getGui().getClass().getSimpleName() + " opened!");
+                throw new AssertionError("GUI Window " + event.getGui().getClass().getSimpleName() + " opened!");
+            }
+        }
+
+    }
 }

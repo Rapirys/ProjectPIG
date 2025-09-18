@@ -20,6 +20,7 @@
 package com.microsoft.Malmo;
 
 import com.microsoft.Malmo.MissionHandlers.*;
+import com.microsoft.Malmo.Utils.*;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufInputStream;
 import io.netty.buffer.ByteBufOutputStream;
@@ -60,11 +61,6 @@ import net.minecraftforge.fml.relauncher.Side;
 import com.microsoft.Malmo.Client.MalmoModClient;
 import com.microsoft.Malmo.Schemas.MissionInit;
 import com.microsoft.Malmo.Server.MalmoModServer;
-import com.microsoft.Malmo.Utils.AddressHelper;
-import com.microsoft.Malmo.Utils.ScoreHelper;
-import com.microsoft.Malmo.Utils.SchemaHelper;
-import com.microsoft.Malmo.Utils.ScreenHelper;
-import com.microsoft.Malmo.Utils.TCPUtils;
 import com.microsoft.Malmo.Client.MalmoEnvServer;
 
 
@@ -77,6 +73,8 @@ public class MalmoMod
     public static final String DIAGNOSTIC_CONFIGS = "malmodiags";
     public static final String AUTHENTICATION_CONFIGS = "malmologins";
     public static final String SCORING_CONFIGS = "malmoscore";
+    public static final String PERFORMANCE_CONFIGS = "malmoperformance";
+    public static final String SEED_CONFIGS = "malmoseed";
     public static final String AGENT_DEAD_QUIT_CODE = "MALMO_AGENT_DIED";
     public static final String AGENT_UNRESPONSIVE_CODE = "MALMO_AGENT_NOT_RESPONDING";
     public static final String VIDEO_UNRESPONSIVE_CODE = "MALMO_VIDEO_NOT_RESPONDING";
@@ -121,14 +119,20 @@ public class MalmoMod
         ScreenHelper.update(this.permanentConfig);
         TCPUtils.update(this.permanentConfig);
         MalmoEnvServer.update(this.sessionConfig);
+        PerformanceHelper.update(this.sessionConfig);
+        SeedHelper.update(this.sessionConfig);
 
         network = NetworkRegistry.INSTANCE.newSimpleChannel("Malmo");
-        network.registerMessage(ObservationFromFullStatsImplementation.FullStatsRequestMessageHandler.class, ObservationFromFullStatsImplementation.FullStatsRequestMessage.class, 1, Side.SERVER);
+
+        // Until we can do tighter message passing and syncing in sync ticking, we want to keep
+        // things client side.
         network.registerMessage(ObservationFromGridImplementation.GridRequestMessageHandler.class, ObservationFromGridImplementation.GridRequestMessage.class, 2, Side.SERVER);
         network.registerMessage(MalmoMessageHandler.class, MalmoMessage.class, 3, Side.CLIENT);	// Malmo messages from server to client
         network.registerMessage(SimpleCraftCommandsImplementation.CraftMessageHandler.class, SimpleCraftCommandsImplementation.CraftMessage.class, 4, Side.SERVER);
         network.registerMessage(NearbyCraftCommandsImplementation.CraftNearbyMessageHandler.class, NearbyCraftCommandsImplementation.CraftNearbyMessage.class, 13, Side.SERVER);
         network.registerMessage(NearbySmeltCommandsImplementation.SmeltNearbyMessageHandler.class, NearbySmeltCommandsImplementation.SmeltNearbyMessage.class, 14, Side.SERVER);
+        network.registerMessage(EquipCommandsImplementation.EquipMessageHandler.class, MineRLTypeHelper.ItemTypeMetadataMessage.class, 15, Side.SERVER);
+        network.registerMessage(PlaceCommandsImplementation.PlaceMessageHandler.class, PlaceCommandsImplementation.PlaceMessage.class, 16, Side.SERVER);
         network.registerMessage(AbsoluteMovementCommandsImplementation.TeleportMessageHandler.class, AbsoluteMovementCommandsImplementation.TeleportMessage.class, 5, Side.SERVER);
         network.registerMessage(MalmoMessageHandler.class, MalmoMessage.class, 6, Side.SERVER);	// Malmo messages from client to server
         network.registerMessage(InventoryCommandsImplementation.InventoryMessageHandler.class, InventoryCommandsImplementation.InventoryMessage.class, 7, Side.SERVER);
@@ -221,6 +225,7 @@ public class MalmoMod
         SERVER_SHARE_REWARD,        // Server has received a reward from a client and is distributing it to the other agents
         SERVER_YOUR_TURN,           // Server turn scheduler is telling client that it is their go next
         SERVER_SOMEOTHERMESSAGE,
+        SERVER_COMMON_SEED,
         CLIENT_AGENTREADY,			// Client response to server's ready request
         CLIENT_AGENTRUNNING,		// Client has just started running
         CLIENT_AGENTSTOPPED,		// Client response to server's stop request
@@ -423,6 +428,7 @@ public class MalmoMod
                     mainThread = Minecraft.getMinecraft();
                 else
                     mainThread = (WorldServer)ctx.getServerHandler().playerEntity.world;
+
                 mainThread.addScheduledTask(new Runnable()
                 {
                     @Override

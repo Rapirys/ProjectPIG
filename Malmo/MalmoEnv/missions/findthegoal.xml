@@ -4,7 +4,7 @@
   </About>
 
   <ModSettings>
-      <MsPerTick>5</MsPerTick>
+      <MsPerTick>50</MsPerTick>
   </ModSettings>
 
   <ServerSection>
@@ -59,6 +59,8 @@
         <Width>320</Width>
         <Height>240</Height>
       </VideoProducer>
+<!--      <ObservationFromBlocksStream />-->
+
 <!--      <ObservationFromFullStats />-->
       <ContinuousMovementCommands turnSpeedDegs="180">
         <ModifierList type="allow-list">

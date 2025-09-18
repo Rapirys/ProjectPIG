@@ -1,0 +1,24 @@
+{
+  "required": true,
+  "package": "com.microsoft.Malmo.Mixins",
+  "mixins": [
+    "MixinEntityRandom",
+    "MixinLargeInventory",
+    "MixinLargeInventorySlots",
+    "MixinMinecraftGameloop",
+    "MixinMinecraftServerRun",
+    "MixinNoGuiInteract",
+    "MixinRandomSkinTexture",
+    "MixinSyncClientStats",
+    "MixinWorldProviderSpawn",
+    "MixinMergeStatsFix",
+    "MixinForgeHookStatsFix"
+  ],
+  "server": [],
+  "client": [
+    "MixinUpdateChunksNoTimeout"
+  ],
+  "compatibilityLevel": "JAVA_8",
+  "minVersion": "0.6.11",
+  "refmap": "mixins.malmo.refmap.json"
+}

@@ -151,7 +151,8 @@ def make_env(config):
             role=0,
             exp_uid="test1",
             episode=0,
-            resync=0, reshape=True) #TODO disable info via step_options
+
+            resync=0, reshape=True, ) #TODO disable info via step_options
 
         base = TransformAction(
             MalmoAdapter(base),

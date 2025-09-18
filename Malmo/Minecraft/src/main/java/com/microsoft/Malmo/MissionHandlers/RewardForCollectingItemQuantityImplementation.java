@@ -48,24 +48,28 @@ public class RewardForCollectingItemQuantityImplementation extends RewardForItem
 
     @SubscribeEvent
     public void onGainItem(RewardForCollectingItemImplementation.GainItemEvent event) {
+        checkCorrectPlayer(event.getEntityPlayer().getName(), event);
         if (event.stack != null && event.cause == 0)
             checkForMatch(event.stack);
     }
 
     @SubscribeEvent
     public void onPickupItem(EntityItemPickupEvent event) {
+        checkCorrectPlayer(event.getEntityPlayer().getName(), event);
         if (event.getItem() != null && event.getEntityPlayer() instanceof EntityPlayerMP)
             checkForMatch(event.getItem().getEntityItem());
     }
 
     @SubscribeEvent
     public void onItemCraft(PlayerEvent.ItemCraftedEvent event) {
+        checkCorrectPlayer(event.player.getName(), event);
         if (event.player instanceof EntityPlayerMP && !event.crafting.isEmpty())
             checkForMatch(event.crafting);
     }
 
     @SubscribeEvent
     public void onItemSmelt(PlayerEvent.ItemSmeltedEvent event) {
+        checkCorrectPlayer(event.player.getName(), event);
         if (event.player instanceof EntityPlayerMP && !event.smelting.isEmpty())
             checkForMatch(event.smelting);
     }
@@ -108,19 +112,29 @@ public class RewardForCollectingItemQuantityImplementation extends RewardForItem
             int prev = (collectedItems.get(is.getUnlocalizedName()) == null ? 0
                     : collectedItems.get(is.getUnlocalizedName()));
             collectedItems.put(is.getUnlocalizedName(), prev + is.getCount());
+
+            // System.out.println("addCollectedItemCount" + variant + " " + is.getUnlocalizedName() + " "+ is.getCount()+ " "+ collectedItems.get(is.getUnlocalizedName()));
         } else {
             int prev = (collectedItems.get(is.getItem().getUnlocalizedName()) == null ? 0
                     : collectedItems.get(is.getItem().getUnlocalizedName()));
             collectedItems.put(is.getItem().getUnlocalizedName(), prev + is.getCount());
+            // System.out.println("addCollectedItemCount" + variant + " " + is.getItem().getUnlocalizedName() + " "+ is.getCount()+ " "+ collectedItems.get(is.getItem().getUnlocalizedName()));
         }
     }
 
     private void checkForMatch(ItemStack is) {
         if (is != null) {
             for (ItemMatcher matcher : this.matchers) {
-                int savedCollected = getCollectedItemCount(is) % matcher.matchSpec.getAmount();
+                int savedCollected;
+                if(params.isOnce()){
+                    savedCollected = getCollectedItemCount(is);
+                } else{
+                    savedCollected = getCollectedItemCount(is) % matcher.matchSpec.getAmount();
+                }
                 if (matcher.matches(is)) {
+                    // If the item matches we calculate the reward given to the agent 
                     if (!params.isSparse()) {
+                        // Sparse rewards are only given once to the agent, once the amount is reached
                         if (savedCollected != 0 && savedCollected < matcher.matchSpec.getAmount()) {
                             for (int i = savedCollected; i < matcher.matchSpec.getAmount()
                                     && i - savedCollected < is.getCount(); i++) {
@@ -142,7 +156,7 @@ public class RewardForCollectingItemQuantityImplementation extends RewardForItem
                             }
                         }
                     } else {
-                        System.out.println("savedCollected " + savedCollected + " amount " + matcher.matchSpec.getAmount() + " count " + is.getCount());
+                        // System.out.println("savedCollected " + savedCollected + " amount " + matcher.matchSpec.getAmount() + " count " + is.getCount());
 
                         if (savedCollected < matcher.matchSpec.getAmount()
                                 && savedCollected + is.getCount() >= matcher.matchSpec.getAmount()) {

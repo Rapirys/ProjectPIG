@@ -29,11 +29,13 @@ import com.microsoft.Malmo.Utils.AddressHelper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.launchwrapper.Launch;
+import net.minecraftforge.client.event.RenderGameOverlayEvent;
 import net.minecraftforge.client.event.RenderWorldLastEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent.Phase;
 import net.minecraftforge.fml.common.gameevent.TickEvent.RenderTickEvent;
+import net.minecraftforge.client.event.RenderHandEvent;
 
 import org.lwjgl.BufferUtils;
 import org.lwjgl.LWJGLException;
@@ -48,6 +50,7 @@ import com.microsoft.Malmo.Schemas.MissionDiagnostics.VideoData;
 import com.microsoft.Malmo.Schemas.MissionInit;
 import com.microsoft.Malmo.Utils.TCPSocketChannel;
 import com.microsoft.Malmo.Utils.TextureHelper;
+import com.microsoft.Malmo.Utils.TimeHelper;
 
 
 /**
@@ -92,9 +95,9 @@ public class VideoHook {
      * Object which maintains our connection to the agent.
      */
     private TCPSocketChannel connection = null;
-    
+
     private int renderWidth;
-    
+
     private int renderHeight;
 
     ByteBuffer buffer = null;
@@ -129,8 +132,12 @@ public class VideoHook {
         this.renderWidth = videoProducer.getWidth();
         this.renderHeight = videoProducer.getHeight();
         resizeIfNeeded();
-        Display.setResizable(false); // prevent the user from resizing using the window borders
+//        Display.setResizable(false); // prevent the user from resizing using the window borders
 
+        // Don't update display for Agent window when running a mission
+        // (true by default to allow interactive mode to refresh the window)
+        TimeHelper.isUpdateWindow = false;
+            
         ClientAgentConnection cac = missionInit.getClientAgentConnection();
         if (cac == null)
             return;	// Don't start up if we don't have any connection details.
@@ -139,18 +146,18 @@ public class VideoHook {
         int agentPort = 0;
         switch (videoProducer.getVideoType())
         {
-        case LUMINANCE:
-            agentPort = cac.getAgentLuminancePort();
-            break;
-        case DEPTH_MAP:
-            agentPort = cac.getAgentDepthPort();
-            break;
-        case VIDEO:
-            agentPort = cac.getAgentVideoPort();
-            break;
-        case COLOUR_MAP:
-            agentPort = cac.getAgentColourMapPort();
-            break;
+            case LUMINANCE:
+                agentPort = cac.getAgentLuminancePort();
+                break;
+            case DEPTH_MAP:
+                agentPort = cac.getAgentDepthPort();
+                break;
+            case VIDEO:
+                agentPort = cac.getAgentVideoPort();
+                break;
+            case COLOUR_MAP:
+                agentPort = cac.getAgentColourMapPort();
+                break;
         }
 
         this.connection = new TCPSocketChannel(agentIPAddress, agentPort, "vid");
@@ -166,29 +173,34 @@ public class VideoHook {
         }
         this.isRunning = true;
     }
-    
+
     /**
      * Resizes the window and the Minecraft rendering if necessary. Set renderWidth and renderHeight first.
      */
+    private static boolean resizeWarning = true;
     private void resizeIfNeeded()
     {
         // resize the window if we need to
-        int oldRenderWidth = Display.getWidth(); 
+        int oldRenderWidth = Display.getWidth();
         int oldRenderHeight = Display.getHeight();
         if( this.renderWidth == oldRenderWidth && this.renderHeight == oldRenderHeight )
             return;
-        
-        try {
-            int old_x = Display.getX();
-            int old_y = Display.getY();
-            Display.setLocation(old_x, old_y);
-            Display.setDisplayMode(new DisplayMode(this.renderWidth, this.renderHeight));
-            System.out.println("Resized the window");
-        } catch (LWJGLException e) {
-            System.out.println("Failed to resize the window!");
-            e.printStackTrace();
+
+        if (resizeWarning) {
+            resizeWarning = false;
+            System.out.println("[LOGTOPY] On Mac OSX Catalina make sure to install this OpenJDK 1.8.0_152-release-1056-b12, this prevents the NSDragRegions crash");
         }
-        forceResize(this.renderWidth, this.renderHeight);
+       try {
+           int old_x = Display.getX();
+           int old_y = Display.getY();
+           Display.setLocation(old_x, old_y);
+           Display.setDisplayMode(new DisplayMode(this.renderWidth, this.renderHeight));
+           System.out.println("Resized the window");
+       } catch (LWJGLException e) {
+           System.out.println("Failed to resize the window!");
+           e.printStackTrace();
+       }
+       forceResize(this.renderWidth, this.renderHeight);
     }
 
     /**
@@ -235,7 +247,7 @@ public class VideoHook {
 
     /**
      * Called before and after the rendering of the world.
-     * 
+     *
      * @param event
      *            Contains information about the event.
      */
@@ -248,16 +260,23 @@ public class VideoHook {
             resizeIfNeeded();
         }
     }
-    
+
     /**
      * Called when the world has been rendered but not yet the GUI or player hand.
-     * 
+     *
      * @param event
      *            Contains information about the event (not used).
      */
     @SubscribeEvent
     public void postRender(RenderWorldLastEvent event)
     {
+        // WHG: HAND RENDER
+        // To render with hand convert RenderWorldLastEvent to RenderGameOverlayEvent.Pre
+        // Then include the following lines
+        // $ if(event.getType() != RenderGameOverlayEvent.ElementType.ALL)
+        // $    return;
+
+
         // Check that the video producer and frame type match - eg if this is a colourmap frame, then
         // only the colourmap videoproducer needs to do anything.
         boolean colourmapFrame = TextureHelper.colourmapFrame;
@@ -298,7 +317,6 @@ public class VideoHook {
                     this.videoProducer.getFrame(this.missionInit, this.buffer);
                     this.buffer.get(data); // Avoiding copy not simple as data is kept & written to a stream later.
                     time_after_render_ns = System.nanoTime();
-
                     envServer.addFrame(data);
                 } else {
                     time_after_render_ns = System.nanoTime();
@@ -331,15 +349,15 @@ public class VideoHook {
                 this.failedTCPSendCount = 0;    // Reset count of failed sends.
                 this.timeOfLastFrame = System.currentTimeMillis();
                 if (this.timeOfFirstFrame == 0)
-                	this.timeOfFirstFrame = this.timeOfLastFrame;
+                    this.timeOfFirstFrame = this.timeOfLastFrame;
                 this.framesSent++;
-	            //            System.out.format("Total: %.2fms; collecting took %.2fms; sending %d bytes took %.2fms\n", ms_send + ms_render, ms_render, size, ms_send);
-	            //            System.out.println("Collect: " + ms_render + "; Send: " + ms_send);
             }
         }
         catch (Exception e)
         {
-            System.out.format(e.getMessage());
+            System.out.println(e);
+            e.printStackTrace();
+            // System.out.format(e.getMessage());
         }
         
         if (!success) {

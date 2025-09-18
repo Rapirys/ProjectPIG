@@ -20,22 +20,34 @@
 package com.microsoft.Malmo.Server;
 
 import java.lang.reflect.Field;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.UUID;
 
 import javax.xml.bind.JAXBElement;
 import javax.xml.bind.JAXBException;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.entity.EntityList;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.SharedMonsterAttributes;
+import net.minecraft.entity.ai.attributes.AttributeModifier;
+import net.minecraft.entity.ai.attributes.IAttributeInstance;
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.launchwrapper.Launch;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.management.PlayerList;
+import net.minecraft.util.FoodStats;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.text.TextComponentString;
 import net.minecraft.util.text.TextFormatting;
 import net.minecraft.world.GameType;
@@ -45,6 +57,7 @@ import net.minecraft.world.biome.Biome.SpawnListEntry;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.living.LivingSpawnEvent.CheckSpawn;
 import net.minecraftforge.event.world.WorldEvent.PotentialSpawns;
+import net.minecraftforge.event.entity.player.PlayerEvent.BreakSpeed;
 import net.minecraftforge.fml.common.FMLCommonHandler;
 import net.minecraftforge.fml.common.eventhandler.Event.Result;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
@@ -63,6 +76,7 @@ import com.microsoft.Malmo.MissionHandlers.MissionBehaviour;
 import com.microsoft.Malmo.Schemas.AgentSection;
 import com.microsoft.Malmo.Schemas.AgentStart.EnderBoxInventory;
 import com.microsoft.Malmo.Schemas.AgentStart.Inventory;
+import com.microsoft.Malmo.Schemas.AgentStart.*;
 import com.microsoft.Malmo.Schemas.DrawItem;
 import com.microsoft.Malmo.Schemas.EntityTypes;
 import com.microsoft.Malmo.Schemas.InventoryObjectType;
@@ -75,7 +89,9 @@ import com.microsoft.Malmo.Utils.EnvironmentHelper;
 import com.microsoft.Malmo.Utils.MinecraftTypeHelper;
 import com.microsoft.Malmo.Utils.SchemaHelper;
 import com.microsoft.Malmo.Utils.ScreenHelper;
+import com.microsoft.Malmo.Utils.SeedHelper;
 import com.microsoft.Malmo.Utils.TimeHelper;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * Class designed to track and control the state of the mod, especially regarding mission launching/running.<br>
@@ -208,6 +224,27 @@ public class ServerStateMachine extends StateMachine
     {
         // Use the server tick to ensure we regularly update our state (from the server thread)
         updateState();
+    }
+
+    @SubscribeEvent
+    public void onGetBreakSpeed(BreakSpeed bs)
+    {
+        String agentname = bs.getEntityPlayer().getName();
+        if (currentMissionInit() != null && currentMissionInit().getMission() != null) {
+            List<AgentSection> agents = currentMissionInit().getMission().getAgentSection();
+            if (agents != null)
+            {
+                for (AgentSection ascandidate : agents)
+                {
+                    if (ascandidate.getName().equals(agentname)) {
+                        Float mul = ascandidate.getAgentStart().getBreakSpeedMultiplier();
+                        if (mul != null) {
+                            bs.setNewSpeed(bs.getNewSpeed() * mul);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /** Called by Forge - call setCanceled(true) to prevent spawning in our world.*/
@@ -559,6 +596,8 @@ public class ServerStateMachine extends StateMachine
                     episodeHasCompleted(ServerState.ERROR);
                 }
             }
+
+
             if (builtOkay)
             {
                 // Now set up other attributes of the environment (eg weather)
@@ -579,6 +618,7 @@ public class ServerStateMachine extends StateMachine
     public class WaitingForAgentsToQuitEpisode extends ErrorAwareEpisode implements MalmoMod.IMalmoMessageListener
     {
         private HashMap<String, Boolean> agentsStopped = new HashMap<String, Boolean>();
+        private Map<String, String> data = null;
 
         protected WaitingForAgentsToQuitEpisode(ServerStateMachine machine)
         {
@@ -595,7 +635,7 @@ public class ServerStateMachine extends StateMachine
                 this.agentsStopped.put(as.getName(), false);
 
             // Now tell all the agents to stop what they are doing:
-            Map<String, String>data = new HashMap<String, String>();
+            data = new HashMap<String, String>();
             data.put("QuitCode", ServerStateMachine.this.quitCode);
             MalmoMod.safeSendToAll(MalmoMessageType.SERVER_STOPAGENTS, data);
         }
@@ -614,7 +654,7 @@ public class ServerStateMachine extends StateMachine
                     MalmoMod.safeSendToAll(MalmoMessageType.SERVER_MISSIONOVER);
                     episodeHasCompleted(ServerState.CLEAN_UP);
                 }
-            }
+            } 
         }
 
         @Override
@@ -634,6 +674,9 @@ public class ServerStateMachine extends StateMachine
                 // to tell us it's finished its mission.
                 MalmoMod.safeSendToAll(MalmoMessageType.SERVER_ABORT);
                 episodeHasCompleted(ServerState.ERROR);
+            }
+            if (data != null) {
+                MalmoMod.safeSendToAll(MalmoMessageType.SERVER_STOPAGENTS, data);
             }
         }
     }
@@ -798,12 +841,25 @@ public class ServerStateMachine extends StateMachine
             return player;
         }
 
+        private void setMaxHealth(EntityLivingBase entity, float maxHealth) {
+            // An arbitrary UUID, we just need it to be different than any other attribute modifier UUID
+            // used in any other mod.
+            UUID modifier_id = UUID.fromString("d7efc338-70d7-42dd-afc0-b198a67c926e");
+            IAttributeInstance attribute = entity.getEntityAttribute(SharedMonsterAttributes.MAX_HEALTH);
+            attribute.removeModifier(modifier_id);
+            double toAdd = maxHealth - attribute.getAttributeValue();
+            // Note: the last argument being 0 means that this is an addition modifier.
+            // See https://minecraft.gamepedia.com/Attribute#Modifiers
+            attribute.applyModifier(new AttributeModifier(modifier_id, "Set Max Health", toAdd, 0));
+        }
+
         private void initialisePlayer(String username, String agentname)
         {
+            System.out.println("Initializing player with username " + username + " and agentname " + agentname);
             AgentSection as = getAgentSectionFromAgentName(agentname);
             EntityPlayerMP player = getPlayerFromUsername(username);
 
-            if (player != null && as != null)
+            if (player != null && as != null) 
             {
                 if ((player.getHealth() <= 0 || player.isDead || !player.isEntityAlive()))
                 {
@@ -813,32 +869,127 @@ public class ServerStateMachine extends StateMachine
                 }
 
                 // Reset their food and health:
-                player.setHealth(player.getMaxHealth());
-                player.getFoodStats().addStats(20, 40);
+                StartingHealth startingHealth = as.getAgentStart().getStartingHealth();
+                if (startingHealth != null) {
+                    setMaxHealth(player, startingHealth.getMaxHealth());
+                    if (startingHealth.getHealth() == null) {
+                        player.setHealth(player.getMaxHealth());
+                    }
+                    else {
+                        player.setHealth(startingHealth.getHealth());
+                    }
+                }
+                else {
+                    player.setHealth(player.getMaxHealth());
+                }
+
+                FoodStats foodStats = player.getFoodStats();
+                foodStats.addStats(20, 40);
+                StartingFood startingFood = as.getAgentStart().getStartingFood();
+                if (startingFood != null) {
+                    foodStats.setFoodLevel(startingFood.getFood());
+                    if (startingFood.getFoodSaturation() != null) {
+                        foodStats.setFoodSaturationLevel(startingFood.getFoodSaturation());
+                    }
+                }
                 player.maxHurtResistantTime = 1; // Set this to a low value so that lava will kill the player straight away.
                 disablePlayerGracePeriod(player);   // Otherwise player will be invulnerable for the first 60 ticks.
                 player.extinguish();	// In case the player was left burning.
 
-                // Set their initial position and speed:
-                PosAndDirection pos = as.getAgentStart().getPlacement();
-                if (pos != null) {
-                    player.rotationYaw = pos.getYaw().floatValue();
-                    player.rotationPitch = pos.getPitch().floatValue();
-                    player.setPositionAndUpdate(pos.getX().doubleValue(),pos.getY().doubleValue(),pos.getZ().doubleValue());
-                    player.onUpdate();	// Needed to force scene to redraw
-                }
-                player.setVelocity(0, 0, 0);	// Minimise chance of drift!
 
                 // Set their inventory:
                 if (as.getAgentStart().getInventory() != null)
-                    initialiseInventory(player, as.getAgentStart().getInventory());
+                initialiseInventory(player, as.getAgentStart().getInventory());
                 // And their Ender inventory:
                 if (as.getAgentStart().getEnderBoxInventory() != null)
                     initialiseEnderInventory(player, as.getAgentStart().getEnderBoxInventory());
 
-                // Set their game mode to spectator for now, to protect them while we wait for the rest of the cast to assemble:
-                player.setGameType(GameType.SPECTATOR);
+                // Set their game mode to adventure for now, to protect them while we wait for the rest of the cast to assemble:
+                // Note setting this to SPECTATOR will cause players to spawn in the ground for unknown reasons
+                player.setGameType(GameType.ADVENTURE);
+                player.onUpdateEntity();
+
+                
+                // Set their initial position and speed:
+                PosAndDirection pos = as.getAgentStart().getPlacement();
+                NearPlayer nearPlayer = as.getAgentStart().getNearPlayer();
+
+                if (pos != null) {
+                    if (nearPlayer != null) {
+                        throw new RuntimeException(
+                                "Either absolute starting position or NearAgent can be specified, but not both!");
+                    }
+                    setPlayerAbsolutePosition(player, pos);
+                } else if (nearPlayer != null) {
+                    setPlayerNearPlayer(player, nearPlayer);
+                }
+                player.setVelocity(0, 0, 0);	// Minimise chance of drift!
+                player.onUpdateEntity();
             }
+        }
+        
+        private void setPlayerAbsolutePosition(EntityPlayerMP player, PosAndDirection pos) {
+            player.rotationYaw = pos.getYaw().floatValue();
+            player.rotationPitch = pos.getPitch().floatValue();
+            player.setPositionAndUpdate(pos.getX().doubleValue(), pos.getY().doubleValue(), pos.getZ().doubleValue());
+            player.onUpdate(); // Needed to force scene to redraw
+        }
+
+        private void setPlayerNearPlayer(EntityPlayerMP player, NearPlayer np) {
+
+            if (player.getName().equals(np.getName())) {
+                // Player is next to themselves by default - no need for further action
+                return;
+            }
+            System.out.println("Setting player " + player.getName() + " next to " + np.getName());
+            double maxDistance = np.getMaxDistance();
+            double minDistance = np.getMinDistance();
+            double maxVertDistance = np.getMaxVertDistance();
+            int tries = 20;
+            EntityPlayerMP anchor = getPlayerFromUsername(np.getName());
+            anchor.onUpdate();
+
+            Random rng = new Random();
+            for (int i = 0; i < tries; i++) {
+                double distance = minDistance + rng.nextDouble() * (maxDistance - minDistance);
+                double angle = rng.nextDouble() * 2.0 * Math.PI;
+                double Z = anchor.posZ + distance * Math.cos(angle);
+                double X = anchor.posX + distance * Math.sin(angle);
+                // ideally, should be determined by the width of the viewport, so that agents
+                // are in each
+                // other's field of view
+                double angleNoise = 20.0;
+
+                double Y = Minecraft.getMinecraft().world.getTopSolidOrLiquidBlock(new BlockPos(X, 0, Z)).getY();
+                System.out.println("Y = " + String.valueOf(Y) + ", anchor.posY = " + String.valueOf(anchor.posY)
+                        + ", anchor.posX = " + String.valueOf(anchor.posX) + ", anchor.posZ = "
+                        + String.valueOf(anchor.posZ));
+                if (np.isLookingAt()) {
+                    double yaw = -angle * 180.0 / Math.PI;
+                    double pitch = -Math.atan((anchor.posY - Y) / distance) * 180 / Math.PI;
+                    player.rotationYaw = (float) (180.0 + yaw + angleNoise * (rng.nextDouble() - 0.5));
+                    anchor.rotationYaw = (float) (yaw + angleNoise * (rng.nextDouble() - 0.5));
+                    player.rotationPitch = (float) (pitch + angleNoise * (rng.nextDouble() - 0.5));
+                    anchor.rotationPitch = -(float) (pitch + angleNoise * (rng.nextDouble() - 0.5));
+
+                    System.out.println(
+                            "Setting agents " + player.getName() + " and " + np.getName() + " looking at each other");
+                    System.out.println("With yaw " + String.valueOf(yaw) + " and pitch " + String.valueOf(pitch));
+
+                }
+                player.setPositionAndUpdate(X, Y, Z);
+                anchor.setPositionAndUpdate(anchor.posX, anchor.posY, anchor.posZ);
+                if (Math.abs(Y - anchor.posY) < maxVertDistance) {
+
+                    break;
+                }
+
+                System.out.println("(Attempt " + String.valueOf(i) + " of " + String.valueOf(tries)
+                        + "):  Failed to place agent " + player.getName() + " within vertical distance "
+                        + String.valueOf(maxVertDistance) + " of anchor player " + np.getName());
+            }
+
+            player.onUpdate();
         }
 
         private boolean disablePlayerGracePeriod(EntityPlayerMP player)
@@ -969,18 +1120,15 @@ public class ServerStateMachine extends StateMachine
                 onError(null);  // We've lost a connection - abort the mission.
         }
 
+        @NotNull
         private ItemStack itemStackFromInventoryObject(InventoryObjectType obj)
         {
-            DrawItem di = new DrawItem();
-            di.setColour(obj.getColour());
-            di.setVariant(obj.getVariant());
-            di.setType(obj.getType());
-            ItemStack item = MinecraftTypeHelper.getItemStackFromDrawItem(di);
-            if( item != null )
-            {
-                item.setCount(obj.getQuantity());
+            Item item = MinecraftTypeHelper.ParseItemType(obj.getType(), true);
+            if (item == null) {
+                throw new RuntimeException(String.format("Could not parse item type '%s'", obj.getType()));
             }
-            return item;
+            ItemStack result = new ItemStack(item, obj.getQuantity(), obj.getMetadata());
+            return result;
         }
 
         private void initialiseInventory(EntityPlayerMP player, Inventory inventory)
@@ -995,11 +1143,9 @@ public class ServerStateMachine extends StateMachine
             for (JAXBElement<? extends InventoryObjectType> el : inventory.getInventoryObject())
             {
                 InventoryObjectType obj = el.getValue();
-                ItemStack item = itemStackFromInventoryObject(obj);
-                if( item != null )
-                {
-                    player.inventory.setInventorySlotContents(obj.getSlot(), item);
-                }
+                if (obj == null) throw new RuntimeException();
+                ItemStack stack = itemStackFromInventoryObject(obj);
+                player.inventory.setInventorySlotContents(obj.getSlot(), stack);
             }
         }
 
@@ -1009,11 +1155,8 @@ public class ServerStateMachine extends StateMachine
             for (JAXBElement<? extends InventoryObjectType> el : inventory.getInventoryObject())
             {
                 InventoryObjectType obj = el.getValue();
-                ItemStack item = itemStackFromInventoryObject(obj);
-                if( item != null )
-                {
-                    player.getInventoryEnderChest().setInventorySlotContents(obj.getSlot(), item);
-                }
+                ItemStack stack = itemStackFromInventoryObject(obj);
+                player.getInventoryEnderChest().setInventorySlotContents(obj.getSlot(), stack);
             }
         }
     }
@@ -1142,6 +1285,7 @@ public class ServerStateMachine extends StateMachine
             ModSettings modsettings = currentMissionInit().getMission().getModSettings();
             if (modsettings != null && modsettings.getMsPerTick() != null)
                 TimeHelper.serverTickLength = (long)(modsettings.getMsPerTick());
+            // TimeHelper.serverTickLength = 5;
                 
             if (getHandlers().quitProducer != null)
                 getHandlers().quitProducer.prepare(currentMissionInit());
@@ -1286,7 +1430,11 @@ public class ServerStateMachine extends StateMachine
         protected void execute()
         {
             // Put in all cleanup code here.
+            MinecraftForge.EVENT_BUS.unregister(ServerStateMachine.this);
             ServerStateMachine.this.currentMissionInit = null;
+            
+            // TODO (R): Kick all of the clients out?
+
             episodeHasCompleted(ServerState.DORMANT);
         }
     }

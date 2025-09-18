@@ -33,7 +33,7 @@ import org.objectweb.asm.tree.MethodNode;
 
 public class OverclockingClassTransformer implements IClassTransformer
 {
-    enum transformType { SERVER, RENDERER, OTHERPLAYER, TEXTURES }
+    enum transformType {  OTHERPLAYER, TEXTURES }
     
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass)
@@ -41,11 +41,7 @@ public class OverclockingClassTransformer implements IClassTransformer
         if (transformedName.startsWith("net.minecraft.client.entity"))
             System.out.println("Transformed Name: " + transformedName);
         boolean isObfuscated = !name.equals(transformedName);
-        if (transformedName.equals("net.minecraft.server.MinecraftServer"))
-            return transform(basicClass, isObfuscated, transformType.SERVER);
-        else if (transformedName.equals("net.minecraft.client.Minecraft"))
-            return transform(basicClass, isObfuscated, transformType.RENDERER);
-        else if (transformedName.equals("net.minecraft.client.entity.EntityOtherPlayerMP"))
+        if (transformedName.equals("net.minecraft.client.entity.EntityOtherPlayerMP"))
             return transform(basicClass, isObfuscated, transformType.OTHERPLAYER);
         else if (transformedName.equals("net.minecraft.client.renderer.GlStateManager"))
             return transform(basicClass, isObfuscated, transformType.TEXTURES);
@@ -55,7 +51,6 @@ public class OverclockingClassTransformer implements IClassTransformer
 
     private static byte[] transform(byte[] serverClass, boolean isObfuscated, transformType type)
     {
-        System.out.println("MALMO: Attempting to transform MinecraftServer");
         try
         {
             ClassNode cnode = new ClassNode();
@@ -64,12 +59,6 @@ public class OverclockingClassTransformer implements IClassTransformer
             
             switch (type)
             {
-            case SERVER:
-                overclockServer(cnode, isObfuscated);
-                break;
-            case RENDERER:
-                overclockRenderer(cnode, isObfuscated);
-                break;
             case OTHERPLAYER:
                 removeInterpolation(cnode, isObfuscated);
                 break;
@@ -83,65 +72,8 @@ public class OverclockingClassTransformer implements IClassTransformer
         }
         catch (Exception e)
         {
-            System.out.println("MALMO FAILED to transform MinecraftServer - overclocking not available!");
         }
         return serverClass;
-    }
-    
-    private static void overclockServer(ClassNode node, boolean isObfuscated)
-    {
-        // We're attempting to replace this code (from the heart of MinecraftServer.run):
-        /*       
-            {
-                while (i > 50L)
-                {
-                    i -= 50L;
-                    this.tick();
-                }
-            }
-    
-            Thread.sleep(Math.max(1L, 50L - i));
-        */
-
-        // With this:
-        /*       
-        {
-            while (i > TimeHelper.serverTickLength)
-            {
-                i -= TimeHelper.serverTickLength;
-                this.tick();
-            }
-        }
-
-        Thread.sleep(Math.max(1L, TimeHelper.serverTickLength - i));
-    */
-        // This allows us to alter the tick length via TimeHelper.
-        
-        final String methodName = "run";
-        final String methodDescriptor = "()V"; // No params, returns void.
-
-        System.out.println("MALMO: Found MinecraftServer, attempting to transform it");
-
-        for (MethodNode method : node.methods)
-        {
-            if (method.name.equals(methodName) && method.desc.equals(methodDescriptor))
-            {
-                System.out.println("MALMO: Found MinecraftServer.run() method, attempting to transform it");
-                for (AbstractInsnNode instruction : method.instructions.toArray())
-                {
-                    if (instruction.getOpcode() == Opcodes.LDC)
-                    {
-                        Object cst = ((LdcInsnNode)instruction).cst;
-                        if ((cst instanceof Long) && (Long)cst == 50)
-                        {
-                            System.out.println("MALMO: Transforming LDC");
-                            AbstractInsnNode replacement = new FieldInsnNode(Opcodes.GETSTATIC, "com/microsoft/Malmo/Utils/TimeHelper", "serverTickLength", "J");
-                            method.instructions.set(instruction, replacement);
-                        }
-                    }
-                }
-            }
-        }
     }
 
     private static void removeInterpolation(ClassNode node, boolean isObfuscated)
@@ -167,46 +99,6 @@ public class OverclockingClassTransformer implements IClassTransformer
                         method.instructions.insert(instruction, newNode);
                         method.instructions.remove(instruction);
                         return;
-                    }
-                }
-            }
-        }
-    }
-
-    private static void overclockRenderer(ClassNode node, boolean isObfuscated)
-    {
-        // We're attempting to turn this line from Minecraft.runGameLoop:
-        //          this.updateDisplay();
-        // into this:
-        //          TimeHelper.updateDisplay();
-        // TimeHelper's method then decides whether or not to pass the call on to Minecraft.updateDisplay().
-        
-        final String methodName = isObfuscated ? "as" : "runGameLoop";
-        final String methodDescriptor = "()V"; // No params, returns void.
-
-        System.out.println("MALMO: Found Minecraft, attempting to transform it");
-
-        for (MethodNode method : node.methods)
-        {
-            if (method.name.equals(methodName) && method.desc.equals(methodDescriptor))
-            {
-                System.out.println("MALMO: Found Minecraft.runGameLoop() method, attempting to transform it");
-                for (AbstractInsnNode instruction : method.instructions.toArray())
-                {
-                    if (instruction.getOpcode() == Opcodes.INVOKEVIRTUAL)
-                    {
-                        MethodInsnNode visitMethodNode = (MethodInsnNode)instruction;
-                        if (visitMethodNode.name.equals(isObfuscated ? "h" : "updateDisplay"))
-                        {
-                            visitMethodNode.owner = "com/microsoft/Malmo/Utils/TimeHelper";
-                            if (isObfuscated)
-                            {
-                                visitMethodNode.name = "updateDisplay";
-                            }
-                            visitMethodNode.setOpcode(Opcodes.INVOKESTATIC);
-                            method.instructions.remove(visitMethodNode.getPrevious());  // ALOAD 0 not needed for static invocation.
-                            System.out.println("MALMO: Hooked into call to Minecraft.updateDisplay()");
-                        }
                     }
                 }
             }

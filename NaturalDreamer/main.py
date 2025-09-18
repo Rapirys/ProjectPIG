@@ -1,3 +1,5 @@
+import time
+
 import gymnasium as gym
 import torch
 import argparse
@@ -9,6 +11,12 @@ from envs import getEnvProperties, GymPixelsProcessingWrapper, CleanGymWrapper, 
 from utils      import saveLossesToCSV, ensureParentFolders
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
+
+def _now_sync():
+    """Wall-clock time with a CUDA sync so GPU kernels are accounted for."""
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return time.perf_counter()
 
 def run(configFile):
     config = loadConfig(configFile)
@@ -37,10 +45,31 @@ def run(configFile):
     for iteration in range(iterationsNum):
         mostRecentScore, steps_taken = dreamer.environmentInteraction(env, config.numInteractionEpisodes, seed=config.seed)
         pbar = tqdm(total=steps_taken, desc=f"Training for run: {iteration}", unit="step", leave=False)
-        for _ in range(steps_taken):
-            sampledData                      = dreamer.buffer.sample(dreamer.config.batchSize, dreamer.config.batchLength)
+
+        for step_idx in range(steps_taken):
+            t0 = _now_sync()
+            sampledData = dreamer.buffer.sample(dreamer.config.batchSize, dreamer.config.batchLength)
+            t1 = _now_sync()
+
             initialStates, worldModelMetrics = dreamer.worldModelTraining(sampledData)
-            behaviorMetrics                  = dreamer.behaviorTraining(initialStates)
+            t2 = _now_sync()
+
+            behaviorMetrics = dreamer.behaviorTraining(initialStates)
+            t3 = _now_sync()
+
+            # durations
+            dt_sample = t1 - t0
+            dt_wm     = t2 - t1
+            dt_beh    = t3 - t2
+            dt_step   = t3 - t0
+
+            # show timings on the bar
+            pbar.set_postfix(sample=f"{dt_sample:.2f}s", wm=f"{dt_wm:.2f}s", beh=f"{dt_beh:.2f}s", step=f"{dt_step:.2f}s")
+
+            # (optional) print a line when something is abnormally slow
+            if dt_step > 3.0:
+                print(f"[slow] iter {iteration} step {step_idx}: sample {dt_sample:.2f}s | world {dt_wm:.2f}s | beh {dt_beh:.2f}s | total {dt_step:.2f}s")
+
             dreamer.totalGradientSteps += 1
             pbar.update(1)
 
@@ -59,7 +88,7 @@ def run(configFile):
 def main(argv=None):
     parser = argparse.ArgumentParser()
     # parser.add_argument("--config", type=str, default="car-racing-v3.yml")
-    parser.add_argument("--config", type=str, default="minecraft.yml")
+    parser.add_argument("--config", type=str, default="minecraft-long.yml")
     run(parser.parse_args(argv).config)
 
 
