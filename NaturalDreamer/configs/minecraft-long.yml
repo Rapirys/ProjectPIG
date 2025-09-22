@@ -7,9 +7,9 @@ replayRatio: 200
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
 checkpointInterval: 500
-resume: False
+resume: False #True
 checkpointToLoad: 3k
-
+#
 episodesBeforeStart: 10
 numInteractionEpisodes: 1
 numEvaluationEpisodes: 1

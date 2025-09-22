@@ -1716,6 +1716,18 @@
         </xs:restriction>
     </xs:simpleType>
 
+    <xs:simpleType name="RequestObservationCommand">
+        <xs:annotation>
+            <xs:documentation>
+                A command for requesting observation.
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="requestLoadedChunks"/>
+            <xs:enumeration value="requestBlockStateRegistry"/>
+        </xs:restriction>
+    </xs:simpleType>
+
     <xs:simpleType name="MissionQuitCommand">
         <xs:annotation>
             <xs:documentation>
@@ -2065,6 +2077,29 @@
                             <xs:restriction base="CommandListModifier">
                                 <xs:choice maxOccurs="unbounded">
                                     <xs:element name="command" type="ChatCommand" minOccurs="0" maxOccurs="unbounded"/>
+                                </xs:choice>
+                            </xs:restriction>
+                        </xs:complexContent>
+                    </xs:complexType>
+                </xs:element>
+            </xs:all>
+        </xs:complexType>
+    </xs:element>
+
+    <xs:element name="CommandsForRequestingObservation">
+        <xs:annotation>
+            <xs:documentation>
+                When present, the Mod will accept commands that allow to request observations on next tick.
+            </xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+            <xs:all>
+                <xs:element name="ModifierList" minOccurs="0" maxOccurs="1">
+                    <xs:complexType>
+                        <xs:complexContent>
+                            <xs:restriction base="CommandListModifier">
+                                <xs:choice maxOccurs="unbounded">
+                                    <xs:element name="command" type="RequestObservationCommand" minOccurs="0" maxOccurs="unbounded"/>
                                 </xs:choice>
                             </xs:restriction>
                         </xs:complexContent>
@@ -2460,6 +2495,28 @@
             </xs:choice>
         </xs:complexType>
     </xs:element>
+
+    <xs:element name="ObservationFromBlocksStream">
+        <xs:annotation>
+            <xs:documentation>
+                Emits every 16×16×16 section whose contents changed
+                since the previous observation tick.
+            </xs:documentation>
+        </xs:annotation>
+        <xs:complexType/>
+    </xs:element>
+
+    <xs:element name="ObservationFromBlockStateRegistry">
+        <xs:annotation>
+            <xs:documentation>
+                Emits a one-shot JSON registry describing global block-state IDs (1.8–1.12).
+            </xs:documentation>
+        </xs:annotation>
+        <xs:complexType/>
+    </xs:element>
+
+
+
 
     <xs:complexType name="RangeDefinition">
         <xs:annotation>

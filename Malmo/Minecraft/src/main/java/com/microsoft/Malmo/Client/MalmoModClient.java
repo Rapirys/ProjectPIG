@@ -240,20 +240,7 @@ public class MalmoModClient
         }
     }
 
-    /**
-     * Event listener that logs when agents open gui windows
-     * @param event the captured event
-     */
-    @SideOnly(Side.CLIENT)
-    @SubscribeEvent(priority = EventPriority.LOWEST)
-    public void onGuiOpenEvent(GuiOpenEvent event){
-        if(this.stateMachine.getStableState() == ClientState.RUNNING){
-            Logger logger = Logger.getLogger("MalmoModClient.onGuiOpenEvent");
-            if (event != null && event.getGui() != null && !(event.getGui() instanceof GuiGameOver)) {
-                logger.log(Level.WARNING, "GUI Window " + event.getGui().getClass().getSimpleName() + " opened!");
-                throw new AssertionError("GUI Window " + event.getGui().getClass().getSimpleName() + " opened!");
-            }
-        }
-
+    public boolean isLowLevelInput() {
+        return stateMachine.currentMissionBehaviour().lowLevelInputs;
     }
 }

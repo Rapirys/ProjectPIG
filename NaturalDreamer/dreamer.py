@@ -4,6 +4,7 @@ from torch.distributions import kl_divergence, Independent, OneHotCategoricalStr
 import numpy as np
 import os
 
+from malmoenv.world_tracking.utils import decode_world_update
 from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, ContinueModel, EncoderConv, DecoderConv, Actor, Critic, \
     HybridActor
 from utils import computeLambdaValues, Moments
@@ -14,6 +15,7 @@ import imageio
 class Dreamer:
     # TODO rename disc_n, cont_dim
     def __init__(self, observationShape, disc_segments, continuous, device, config):
+        self.block_state_registry = None
         self.observationShape   = observationShape
         cont_dim, actionLow, actionHigh = continuous
 
@@ -66,11 +68,17 @@ class Dreamer:
 
     def worldModelTraining(self, data):
         encodedObservations = self.encoder(data.observations.view(-1, *self.observationShape)).view(self.config.batchSize, self.config.batchLength, -1)
-        previousRecurrentState  = torch.zeros(self.config.batchSize, self.recurrentSize,    device=self.device)
-        previousLatentState     = torch.zeros(self.config.batchSize, self.latentSize,       device=self.device)
+        previousRecurrentState = torch.zeros(self.config.batchSize, self.recurrentSize, device=self.device)
+        previousLatentState = torch.zeros(self.config.batchSize, self.latentSize, device=self.device)
 
         recurrentStates, priorsLogits, posteriors, posteriorsLogits = [], [], [], []
         for t in range(1, self.config.batchLength):
+            first_t = data.is_first[:, t].float().unsqueeze(-1)
+
+            # Reset the recurrent + latent state for rows that start here
+            previousRecurrentState = previousRecurrentState * (1.0 - first_t)
+            previousLatentState = previousLatentState * (1.0 - first_t)
+
             recurrentState              = self.recurrentModel(previousRecurrentState, previousLatentState, data.actions[:, t-1])
             _, priorLogits              = self.priorNet(recurrentState)
             posterior, posteriorLogits  = self.posteriorNet(torch.cat((recurrentState, encodedObservations[:, t]), -1))
@@ -118,6 +126,7 @@ class Dreamer:
             worldModelLoss      += continueLoss.mean()
 
         self.worldModelOptimizer.zero_grad()
+        #TODO Add loss masking
         worldModelLoss.backward()
         nn.utils.clip_grad_norm_(self.worldModelParameters, self.config.gradientClip, norm_type=self.config.gradientNormType)
         self.worldModelOptimizer.step()
@@ -188,20 +197,26 @@ class Dreamer:
             latentState    = torch.zeros(1, self.latentSize,    device=self.device)
             prevActionVec  = torch.zeros(1, self.actionSize,    device=self.device)
 
-            observation = env.reset(seed= (seed + self.totalEpisodes if seed else None))
+            observation, info = env.reset(seed= (seed + self.totalEpisodes if seed else None))
+            self.block_state_registry = info["BlockStateRegistry"]
+            world_state = decode_world_update(info["world_observation"])
+            print(world_state.summary())
             encodedObservation = self.encoder(torch.from_numpy(observation).float().unsqueeze(0).to(self.device))
 
-            currentScore, stepCount, done, frames = 0, 0, False, []
+            currentScore, stepCount, done, is_first, frames = 0, 0, False, True, []
             while not done:
                 recurrentState = self.recurrentModel(recurrentState, latentState, prevActionVec)
                 latentState, _ = self.posteriorNet(torch.cat((recurrentState, encodedObservation.view(1, -1)), -1))
 
                 actionFlat, _, _ = self.actor(torch.cat((recurrentState, latentState), -1))
-                nextObservation, reward, done = env.step(actionFlat.cpu().numpy().reshape(-1))
+                nextObservation, reward, done, info = env.step(actionFlat.cpu().numpy().reshape(-1))
                 prevActionVec = actionFlat
 
                 if not evaluation:
-                    self.buffer.add(observation, prevActionVec.cpu().numpy().reshape(-1), reward, nextObservation, done)
+                    #TODO add world_state to buffer
+                    world_state = decode_world_update(info["world_observation"])
+                    self.buffer.add(observation, world_state, prevActionVec.cpu().numpy().reshape(-1), reward, done, is_first)
+                is_first = False
 
                 if saveVideo and i == 0:
                     frame = env.render()

@@ -24,15 +24,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.logging.Logger;
 
-import com.microsoft.Malmo.MissionHandlerInterfaces.IAudioProducer;
-import com.microsoft.Malmo.MissionHandlerInterfaces.ICommandHandler;
-import com.microsoft.Malmo.MissionHandlerInterfaces.IObservationProducer;
-import com.microsoft.Malmo.MissionHandlerInterfaces.IPerformanceProducer;
-import com.microsoft.Malmo.MissionHandlerInterfaces.IRewardProducer;
-import com.microsoft.Malmo.MissionHandlerInterfaces.IVideoProducer;
-import com.microsoft.Malmo.MissionHandlerInterfaces.IWantToQuit;
-import com.microsoft.Malmo.MissionHandlerInterfaces.IWorldDecorator;
-import com.microsoft.Malmo.MissionHandlerInterfaces.IWorldGenerator;
+import com.microsoft.Malmo.MissionHandlerInterfaces.*;
 import com.microsoft.Malmo.Schemas.AgentHandlers;
 import com.microsoft.Malmo.Schemas.AgentSection;
 import com.microsoft.Malmo.Schemas.MissionInit;
@@ -44,6 +36,7 @@ import com.microsoft.Malmo.Utils.TimeHelper;
 public class MissionBehaviour
 {
     public List<IVideoProducer> videoProducers = new ArrayList<IVideoProducer>();
+    public IBinaryDataProducer binaryDataProducer;
     public IAudioProducer audioProducer = null;
     public ICommandHandler commandHandler = null;
     public IObservationProducer observationProducer = null;
@@ -52,6 +45,7 @@ public class MissionBehaviour
     public IWorldGenerator worldGenerator = null;
     public IPerformanceProducer performanceProducer = null;
     public IWantToQuit quitProducer = null;
+    public boolean lowLevelInputs = false;
 
     private String failedHandlers = "";
     
@@ -94,6 +88,7 @@ public class MissionBehaviour
     private void reset()
     {
         this.videoProducers = new ArrayList<IVideoProducer>();
+        this.binaryDataProducer = null;
         this.audioProducer = null;
         this.commandHandler = null;
         this.observationProducer = null;
@@ -116,6 +111,9 @@ public class MissionBehaviour
         List<AgentSection> agents = missionInit.getMission().getAgentSection();
         if (agents != null && agents.size() > 1)
             addHandler(new RewardFromTeamImplementation());
+        // TODO hack - low level inputs are read from first agent. Ideally they should be either agent-specific,
+        // or mission-level
+        lowLevelInputs = agents.get(0).getAgentStart().isLowLevelInputs() != null && agents.get(0).getAgentStart().isLowLevelInputs();
     }
 
     public boolean addExtraHandlers(List<Object> handlers)
@@ -166,8 +164,8 @@ public class MissionBehaviour
 
         if (handler instanceof IVideoProducer)
             addVideoProducer((IVideoProducer)handler);
-        else if (handler instanceof IAudioProducer)
-            addAudioProducer((IAudioProducer)handler);
+        else if (handler instanceof IBinaryDataProducer)
+            addBinaryDataProducer((IBinaryDataProducer)handler);
         else if (handler instanceof IPerformanceProducer)
             addPerformanceProducer((IPerformanceProducer)handler);
         else if (handler instanceof ICommandHandler)
@@ -193,7 +191,15 @@ public class MissionBehaviour
         else
             this.videoProducers.add(handler);
     }
-    
+
+    private void addBinaryDataProducer(IBinaryDataProducer handler)
+    {
+        if (this.binaryDataProducer != null)
+            this.failedHandlers += "Too many binary data producers specified - only one allowed at present.\n";
+        else
+            this.binaryDataProducer = handler;
+    }
+
     private void addPerformanceProducer(IPerformanceProducer handler){
         if (this.performanceProducer != null)
             this.failedHandlers += "Too many audio producers specified - only one allowed at present.\n";

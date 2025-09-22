@@ -174,12 +174,12 @@
 			
                         
 			<Placement pitch="30" x="5.5" y="4" yaw="90" z="5.5"/>
-			
-                        
-			<Inventory>
-				<InventoryBlock quantity="1" slot="39" type="diamond_helmet"/>
-			</Inventory>
-			
+
+            <Inventory>
+                <InventoryBlock quantity="1" slot="39" type="diamond_helmet" metadata="0"/>
+            </Inventory>
+
+
                   
 		</AgentStart>
 		<AgentHandlers>
@@ -276,7 +276,7 @@
 			
                         
 			<Inventory>
-				<InventoryBlock quantity="1" slot="39" type="iron_helmet"/>
+				<InventoryBlock quantity="1" slot="39" type="iron_helmet" metadata="0"/>
 			</Inventory>
 			
                   

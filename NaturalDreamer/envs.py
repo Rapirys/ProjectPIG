@@ -42,11 +42,7 @@ class CleanGymWrapper(gym.Wrapper):
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         done = terminated or truncated
-        return obs, reward, done
-
-    def reset(self, seed=None):
-        obs, info = self.env.reset(seed=seed)
-        return obs
+        return obs, reward, done, info
 
 
 class FlatDictActionSpace(gym.ActionWrapper):
@@ -124,7 +120,7 @@ class MalmoAdapter(gym.Env):
         self.action_space = malmo_env.action_space
         self.observation_space = malmo_env.observation_space
 
-    def reset(self, *, seed=None, options=None): return self.env.reset(), {}  # Gymnasium requires (obs, info)
+    def reset(self, *, seed=None, options=None): return self.env.reset()  # Gymnasium requires (obs, info)
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
         return obs, reward, bool(done), False, info #The info is likely to be json string, not dict
@@ -140,7 +136,7 @@ def make_env(config):
         eval_base = gym.make(environment_name, render_mode="rgb_array")
 
     if environment_name in {"Minecraft"}:
-        xml = Path("../Malmo/MalmoEnv/missions/findthegoal.xml").read_text()
+        xml = Path("../Malmo/MalmoEnv/missions/mobchase_single_agent.xml").read_text() #findthegoal.xml
         base = malmoenv.make()
         base.init(
             xml,
@@ -151,8 +147,7 @@ def make_env(config):
             role=0,
             exp_uid="test1",
             episode=0,
-
-            resync=0, reshape=True, ) #TODO disable info via step_options
+            resync=0, reshape=True, )
 
         base = TransformAction(
             MalmoAdapter(base),

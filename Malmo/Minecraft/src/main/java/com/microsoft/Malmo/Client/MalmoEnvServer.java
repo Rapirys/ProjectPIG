@@ -20,33 +20,31 @@
 package com.microsoft.Malmo.Client;
 
 import com.microsoft.Malmo.MalmoMod;
-import com.microsoft.Malmo.Client.MalmoModClient.InputType;
 import com.microsoft.Malmo.MissionHandlerInterfaces.IWantToQuit;
+import com.microsoft.Malmo.MissionHandlers.CommandsForRequestingObservationImplementation;
 import com.microsoft.Malmo.Schemas.MissionInit;
 import com.microsoft.Malmo.Utils.LogHelper;
+import com.microsoft.Malmo.Utils.TCPInputPoller;
 import com.microsoft.Malmo.Utils.TCPUtils;
-
+import com.microsoft.Malmo.Utils.TimeHelper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.profiler.Profiler;
-import com.microsoft.Malmo.Utils.TimeHelper;
-
 import net.minecraftforge.common.config.Configuration;
+
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.Charset;
+import java.util.Hashtable;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.Hashtable;
-import com.microsoft.Malmo.Utils.TCPInputPoller;
 import java.util.logging.Level;
-
-import java.util.LinkedList;
-import java.util.List;
 
 
 /**
@@ -77,6 +75,7 @@ public class MalmoEnvServer implements IWantToQuit {
         double reward = 0.0;
         byte[] obs = null;
         String info = "{}";
+        byte[] worldState = null;
         LinkedList<String> commands = new LinkedList<String>();
     }
 
@@ -375,6 +374,7 @@ public class MalmoEnvServer implements IWantToQuit {
         envState.commands.clear();
         envState.obs = null;
         envState.info = "{}";
+        envState.worldState = null;
 
 
         envState.missionInit = command;
@@ -442,7 +442,8 @@ public class MalmoEnvServer implements IWantToQuit {
         String actions = command.substring(stepClientTagLength, command.length() - (stepClientTagLength + 2));
         nsteps += 1;
         int options =  Character.getNumericValue(command.charAt(stepServerTagLength - 2));
-        boolean withInfo = options == 0 || options == 2;
+        boolean withInfo = !((options & 1) == 1);
+        boolean withWorldState = !((options & 4) == 4);
 
         // Prepare to write data to the client.
         DataOutputStream dout = new DataOutputStream(socket.getOutputStream());
@@ -450,6 +451,7 @@ public class MalmoEnvServer implements IWantToQuit {
         boolean done;
         byte[] obs;
         String info = "";
+        byte[] worldState = null;
         boolean sent = true;
 
         // TimeHelper.SyncManager.debugLog("[MALMO_ENV_SERVER] <STEP> Acquiring lock for synchronous step.");
@@ -511,6 +513,11 @@ public class MalmoEnvServer implements IWantToQuit {
                 // TimeHelper.SyncManager.debugLog("[MALMO_ENV_SERVER] <STEP> FILLING NONNULL");
 
             }
+
+            if (withWorldState) {
+                worldState = envState.worldState;
+            }
+
             done = envState.done;
 
             // TimeHelper.SyncManager.debugLog("[MALMO_ENV_SERVER] <STEP> STATUS " + Boolean.toString(done));
@@ -524,6 +531,7 @@ public class MalmoEnvServer implements IWantToQuit {
             previousEnvState.reward = envState.reward;
             previousEnvState.commands = envState.commands;
             previousEnvState.obs = envState.obs;
+            previousEnvState.worldState = envState.worldState;
             previousEnvState.info = envState.info;
             previousEnvState.missionInit = envState.missionInit;
             previousEnvState.done = envState.done;
@@ -539,6 +547,7 @@ public class MalmoEnvServer implements IWantToQuit {
 
             envState.info = "{}";
             envState.obs = null;
+            envState.worldState  = null;
             envState.reward = 0.0;
 
             // TimeHelper.SyncManager.debugLog("[MALMO_ENV_SERVER] <STEP> Info received..");
@@ -562,6 +571,12 @@ public class MalmoEnvServer implements IWantToQuit {
             byte[] infoBytes = info.getBytes(utf8);
             dout.writeInt(infoBytes.length);
             dout.write(infoBytes);
+        }
+
+        if (withWorldState) {
+            int worldStateLength = (worldState == null) ? 0 : worldState.length;
+            dout.writeInt(worldStateLength);
+            if (worldStateLength > 0) dout.write(worldState);
         }
 
         profiler.endSection(); //write obs
@@ -639,6 +654,7 @@ public class MalmoEnvServer implements IWantToQuit {
         byte[] obs;
         boolean done;
         String info = "";
+        byte[] worldState;
 
         lock.lock();
 
@@ -658,6 +674,9 @@ public class MalmoEnvServer implements IWantToQuit {
             }
 
             waitTick();
+            //TODO Make configurable
+            CommandsForRequestingObservationImplementation.ObservationRequestBus.requestRegistry();
+            CommandsForRequestingObservationImplementation.ObservationRequestBus.requestWorld();
             waitTick();
 
 
@@ -668,7 +687,7 @@ public class MalmoEnvServer implements IWantToQuit {
             // TimeHelper.SyncManager.debugLog("[MALMO_ENV_SERVER] <PEEK> Observation acquired.");
             done = envState.done;
             info = envState.info;
-           
+            worldState = envState.worldState;
         } finally {
             lock.unlock();
         }
@@ -679,6 +698,10 @@ public class MalmoEnvServer implements IWantToQuit {
         byte[] infoBytes = info.getBytes(utf8);
         dout.writeInt(infoBytes.length);
         dout.write(infoBytes);
+
+        int worldStateLength = (worldState == null) ? 0 : worldState.length;
+        dout.writeInt(worldStateLength);
+        if (worldStateLength > 0) dout.write(worldState);
 
         dout.writeInt(1);
         dout.writeByte(done ? 1 : 0);
@@ -930,6 +953,16 @@ public class MalmoEnvServer implements IWantToQuit {
             // lock.unlock();
         }
     }
+
+    public void worldState(byte[] worldState) {
+        // lock.lock();
+//        try {
+            envState.worldState = worldState;
+//        } finally {
+//             lock.unlock();
+//        }
+    }
+
 
     public void addRewards(double rewards) {
         // lock.lock();

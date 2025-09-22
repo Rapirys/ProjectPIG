@@ -19,20 +19,25 @@
 
 package com.microsoft.Malmo.Client;
 
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.lang.reflect.Field;
-import java.math.BigDecimal;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.*;
-import java.util.Map.Entry;
-import java.util.logging.Level;
-
-import javax.xml.bind.JAXBException;
-import javax.xml.stream.XMLStreamException;
-
+import com.google.gson.JsonObject;
+import com.microsoft.Malmo.Client.MalmoModClient.InputType;
+import com.microsoft.Malmo.IState;
+import com.microsoft.Malmo.MalmoMod;
+import com.microsoft.Malmo.MalmoMod.IMalmoMessageListener;
+import com.microsoft.Malmo.MalmoMod.MalmoMessageType;
+import com.microsoft.Malmo.MissionHandlerInterfaces.IBinaryDataProducer;
+import com.microsoft.Malmo.MissionHandlerInterfaces.IVideoProducer;
+import com.microsoft.Malmo.MissionHandlerInterfaces.IWantToQuit;
+import com.microsoft.Malmo.MissionHandlers.MissionBehaviour;
+import com.microsoft.Malmo.MissionHandlers.MultidimensionalReward;
 import com.microsoft.Malmo.Schemas.*;
+import com.microsoft.Malmo.Schemas.ServerSection.HumanInteraction;
+import com.microsoft.Malmo.StateEpisode;
+import com.microsoft.Malmo.StateMachine;
+import com.microsoft.Malmo.Utils.*;
+import com.microsoft.Malmo.Utils.ScreenHelper.TextCategory;
+import com.microsoft.Malmo.Utils.TCPInputPoller.CommandAndIPAddress;
+import com.microsoft.Malmo.Utils.TimeHelper.SyncTickEvent;
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
@@ -72,37 +77,22 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent.ClientTickEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent.Phase;
 import net.minecraftforge.fml.common.gameevent.TickEvent.ServerTickEvent;
-
 import org.xml.sax.SAXException;
 
-import com.google.gson.JsonObject;
-import com.microsoft.Malmo.IState;
-import com.microsoft.Malmo.MalmoMod;
-import com.microsoft.Malmo.MalmoMod.IMalmoMessageListener;
-import com.microsoft.Malmo.MalmoMod.MalmoMessageType;
-import com.microsoft.Malmo.StateEpisode;
-import com.microsoft.Malmo.StateMachine;
-import com.microsoft.Malmo.Client.MalmoModClient.InputType;
-import com.microsoft.Malmo.MissionHandlerInterfaces.IVideoProducer;
-import com.microsoft.Malmo.MissionHandlerInterfaces.IWantToQuit;
-import com.microsoft.Malmo.MissionHandlers.MissionBehaviour;
-import com.microsoft.Malmo.MissionHandlers.MultidimensionalReward;
-import com.microsoft.Malmo.Schemas.ServerSection.HumanInteraction;
-import com.microsoft.Malmo.Utils.AddressHelper;
-import com.microsoft.Malmo.Utils.AuthenticationHelper;
-import com.microsoft.Malmo.Utils.SchemaHelper;
-import com.microsoft.Malmo.Utils.ScreenHelper;
-import com.microsoft.Malmo.Utils.SeedHelper;
-import com.microsoft.Malmo.Utils.ScoreHelper;
-import com.microsoft.Malmo.Utils.TextureHelper;
-import com.microsoft.Malmo.Utils.ScreenHelper.TextCategory;
-import com.microsoft.Malmo.Utils.TCPInputPoller;
-import com.microsoft.Malmo.Utils.TCPInputPoller.CommandAndIPAddress;
-import com.microsoft.Malmo.Utils.TimeHelper.SyncTickEvent;
-import com.microsoft.Malmo.Utils.TCPSocketChannel;
-import com.microsoft.Malmo.Utils.TCPUtils;
-import com.microsoft.Malmo.Utils.TimeHelper;
-import com.mojang.authlib.properties.Property;
+import javax.xml.bind.JAXBException;
+import javax.xml.stream.XMLStreamException;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.math.BigDecimal;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.nio.BufferOverflowException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.*;
+import java.util.Map.Entry;
+import java.util.logging.Level;
 
 /**
  * Class designed to track and control the state of the mod, especially regarding mission launching/running.<br>
@@ -138,6 +128,8 @@ public class ClientStateMachine extends StateMachine implements IMalmoMessageLis
     String reservationID = "";   // empty if we are not reserved, otherwise "RESERVED" + the experiment ID we are reserved for.
     long reservationExpirationTime = 0;
     private TCPSocketChannel missionControlSocket;
+
+    private ByteBuffer worldBuf = ByteBuffer.allocate(256 * 1024).order(ByteOrder.LITTLE_ENDIAN);
 
     private void reserveClient(String id)
     {
@@ -1863,6 +1855,9 @@ public class ClientStateMachine extends StateMachine implements IMalmoMessageLis
             if (currentMissionBehaviour().observationProducer != null)
                 currentMissionBehaviour().observationProducer.prepare(currentMissionInit());
 
+            if (currentMissionBehaviour().binaryDataProducer != null)
+                currentMissionBehaviour().binaryDataProducer.prepare(currentMissionInit());
+
             if (currentMissionBehaviour().quitProducer != null)
                 currentMissionBehaviour().quitProducer.prepare(currentMissionInit());
 
@@ -1875,8 +1870,14 @@ public class ClientStateMachine extends StateMachine implements IMalmoMessageLis
             // Force brightness setting
             Minecraft.getMinecraft().gameSettings.gammaSetting = (float) 2.0;
             
-            // Disable the gui for the episode!
-            Minecraft.getMinecraft().gameSettings.hideGUI = true;
+            if (missionBehaviour.lowLevelInputs) {
+                Minecraft.getMinecraft().gameSettings.hideGUI = false;
+                Minecraft.getMinecraft().gameSettings.guiScale = 2;
+                Minecraft.getMinecraft().gameSettings.fancyGraphics = true;
+            } else {
+                // Disable the gui for the episode!
+                Minecraft.getMinecraft().gameSettings.hideGUI = true;
+            }
 
             for (IVideoProducer videoProducer : currentMissionBehaviour().videoProducers)
             {
@@ -1954,6 +1955,10 @@ public class ClientStateMachine extends StateMachine implements IMalmoMessageLis
 
             if (currentMissionBehaviour().observationProducer != null)
                 currentMissionBehaviour().observationProducer.cleanup();
+
+            if (currentMissionBehaviour().binaryDataProducer != null)
+                currentMissionBehaviour().binaryDataProducer.cleanup();
+
 
             if (currentMissionBehaviour().commandHandler != null)
             {
@@ -2221,6 +2226,34 @@ public class ClientStateMachine extends StateMachine implements IMalmoMessageLis
                 data = json.toString();
             }
             Minecraft.getMinecraft().mcProfiler.endSection(); //malmogatherjson
+
+            Minecraft.getMinecraft().mcProfiler.startSection("malmoGatherWorldUpdatesSection");
+
+            if (currentMissionBehaviour() != null && currentMissionBehaviour().binaryDataProducer != null) {
+                IBinaryDataProducer producer = currentMissionBehaviour().binaryDataProducer;
+
+                while (true) {
+                    worldBuf.clear();
+                    try {
+                        producer.writeBinaryData(currentMissionInit(), worldBuf);
+                        break;
+                    } catch (BufferOverflowException e) {
+                        int newCap = worldBuf.capacity() << 1;
+                        System.out.println("Failed to write world update data. Grow buffer to: " + newCap);
+                        worldBuf = ByteBuffer.allocate(newCap).order(ByteOrder.LITTLE_ENDIAN); // grow and retry
+                    }
+                }
+
+                int len = worldBuf.position();
+                byte[] arr = worldBuf.array();
+                byte[] slice = (len == 0) ? new byte[0] : java.util.Arrays.copyOf(arr, len);
+                if (envServer != null) {
+                    envServer.worldState(slice);
+                }
+            }
+
+            Minecraft.getMinecraft().mcProfiler.endSection();
+
             Minecraft.getMinecraft().mcProfiler.startSection("malmoSendTCPObservations");
 
             ClientAgentConnection cac = currentMissionInit().getClientAgentConnection();

@@ -4,7 +4,7 @@
   </About>
 
   <ModSettings>
-      <MsPerTick>50</MsPerTick>
+      <MsPerTick>5</MsPerTick>
   </ModSettings>
 
   <ServerSection>
@@ -17,7 +17,7 @@
         <AllowSpawning>false</AllowSpawning>
        </ServerInitialConditions>
     <ServerHandlers>
-      <FlatWorldGenerator generatorString="3;7,220*1,5*3,2;3;,biome_1" />
+      <FlatWorldGenerator generatorString="3;7,220*1,5*3,2;3;,biome_1" forceReset="true"/>
       <ClassroomDecorator seed="4711">
         <specification>
           <width>7</width>
@@ -44,7 +44,7 @@
           <hintLikelihood>1</hintLikelihood>
         </specification>
       </ClassroomDecorator>
-      <ServerQuitFromTimeUp timeLimitMs="30000" description="out_of_time"/>
+      <ServerQuitFromTimeUp timeLimitMs="3000000" description="out_of_time"/>
       <ServerQuitWhenAnyAgentFinishes />
     </ServerHandlers>
   </ServerSection>
@@ -52,23 +52,24 @@
   <AgentSection mode="Survival">
     <Name>Agent1</Name>
     <AgentStart>
+      <LowLevelInputs>true</LowLevelInputs>
       <Placement x="-203.5" y="81.0" z="217.5"/>
     </AgentStart>
     <AgentHandlers>
       <VideoProducer want_depth="false">
-        <Width>320</Width>
-        <Height>240</Height>
+        <Width>512</Width>
+        <Height>288</Height>
       </VideoProducer>
-<!--      <ObservationFromBlocksStream />-->
+      <ObservationFromBlocksStream />
 
-<!--      <ObservationFromFullStats />-->
+      <ObservationFromFullStats />
       <ContinuousMovementCommands turnSpeedDegs="180">
         <ModifierList type="allow-list">
           <command>move</command>
           <command>turn</command>
         </ModifierList>
       </ContinuousMovementCommands>
-      <MissionQuitCommands/>
+        <MissionQuitCommands/>
       <RewardForSendingCommand reward="-0.01" />
       <RewardForMissionEnd rewardForDeath="-1">
         <Reward description="found_goal" reward="0.5" />

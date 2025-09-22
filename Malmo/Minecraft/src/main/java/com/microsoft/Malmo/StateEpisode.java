@@ -19,6 +19,7 @@
 
 package com.microsoft.Malmo;
 
+import com.microsoft.Malmo.Utils.TimeHelper;
 import com.microsoft.Malmo.Utils.TimeHelper.SyncTickEvent;
 
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
