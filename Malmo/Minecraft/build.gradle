@@ -17,7 +17,7 @@ buildscript {
     dependencies {
         classpath 'org.ow2.asm:asm:6.0'
 //         TODO add relative path
-        classpath fileTree('/home/rapirys/PycharmProjects/minedojo/MineDojo/MixinGradle-dcfaf61.jar')
+        classpath fileTree('MixinGradle-dcfaf61.jar')
 
 
         classpath 'com.github.yunfanjiang:ForgeGradle:FG_2.2_patched-SNAPSHOT'
