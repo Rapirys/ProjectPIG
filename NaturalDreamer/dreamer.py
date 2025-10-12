@@ -4,6 +4,7 @@ from torch.distributions import kl_divergence, Independent, OneHotCategoricalStr
 import numpy as np
 import os
 
+from NaturalDreamer.minecraft import TestBlockPositionDecoding
 from malmoenv.world_tracking.utils import decode_world_update
 from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, ContinueModel, EncoderConv, DecoderConv, Actor, Critic, \
     HybridActor
@@ -15,7 +16,6 @@ import imageio
 class Dreamer:
     # TODO rename disc_n, cont_dim
     def __init__(self, observationShape, disc_segments, continuous, device, config):
-        self.block_state_registry = None
         self.observationShape   = observationShape
         cont_dim, actionLow, actionHigh = continuous
 
@@ -58,6 +58,9 @@ class Dreamer:
         self.totalEpisodes      = 0
         self.totalEnvSteps      = 0
         self.totalGradientSteps = 0
+
+        self.block_state_registry = None
+        self.testBlockPositionDecoding = None
 
     def _flat_action(self, a: dict):
         # TODO Review if there a better place
@@ -198,9 +201,12 @@ class Dreamer:
             prevActionVec  = torch.zeros(1, self.actionSize,    device=self.device)
 
             observation, info = env.reset(seed= (seed + self.totalEpisodes if seed else None))
+
+
             self.block_state_registry = info["BlockStateRegistry"]
+            self.testBlockPositionDecoding = TestBlockPositionDecoding(self.config)
+
             world_state = decode_world_update(info["world_observation"])
-            print(world_state.summary())
             encodedObservation = self.encoder(torch.from_numpy(observation).float().unsqueeze(0).to(self.device))
 
             currentScore, stepCount, done, is_first, frames = 0, 0, False, True, []
@@ -214,8 +220,9 @@ class Dreamer:
 
                 if not evaluation:
                     #TODO add world_state to buffer
-                    world_state = decode_world_update(info["world_observation"])
+                    self.testBlockPositionDecoding.compute(info)
                     self.buffer.add(observation, world_state, prevActionVec.cpu().numpy().reshape(-1), reward, done, is_first)
+                    world_state = decode_world_update(info["world_observation"])
                 is_first = False
 
                 if saveVideo and i == 0:

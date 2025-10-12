@@ -110,16 +110,30 @@ class FlatDictActionSpace(gym.ActionWrapper):
         return out
 
 
-class MinecraftWrapper(gym.ObservationWrapper):
+
+class MinecraftWrapper(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
-        observationSpace = self.observation_space
-        newObsShape = observationSpace.shape[-1:] + observationSpace.shape[:2]
-        self.observation_space = gym.spaces.Box(low=0, high=1, shape=newObsShape, dtype=np.float32)
+        observation_space = self.observation_space
+        H, W, C = observation_space.shape
+        low = observation_space.low[..., :3]
+        high = observation_space.high[..., :3]
+        assert C == 4, ("depth is expected" if C == 3 else "")
+        self.observation_space = gym.spaces.Box(low=low, high=high, shape=(H, W, 3), dtype=observation_space.dtype)
+        self._rgb = np.s_[:, :, :3]
+        self._depth = np.s_[:, :, 3]
 
-    def observation(self, observation):
-        observation = np.transpose(observation, (2, 0, 1))/255.0
-        return observation
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        rgb, depth = obs[self._rgb], obs[self._depth]
+        info["depth"] = depth
+        return rgb, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        rgb, depth = obs[self._rgb], obs[self._depth]
+        info["depth"] = depth
+        return rgb, reward, terminated, truncated, info
 
 
 
@@ -166,10 +180,10 @@ def make_env(config):
             func=lambda a: a["actions"],
             action_space=spaces.Dict({"actions": base.action_space}),
         )
-        base = FlatDictActionSpace(base)
+        base = MinecraftWrapper(FlatDictActionSpace(base))
         eval_base = base
 
     # TODO Different resize for minecraft
     env = CleanGymWrapper(GymPixelsProcessingWrapper(gym.wrappers.ResizeObservation(base, (64, 64))))
-    env_eval = CleanGymWrapper(GymPixelsProcessingWrapper(MinecraftWrapper(gym.wrappers.ResizeObservation(eval_base, (64, 64)))))
+    env_eval = CleanGymWrapper(GymPixelsProcessingWrapper(gym.wrappers.ResizeObservation(eval_base, (64, 64))))
     return env, env_eval
