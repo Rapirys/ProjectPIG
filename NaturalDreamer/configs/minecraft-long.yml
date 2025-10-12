@@ -45,7 +45,7 @@ dreamer:
     depth: 16
     stride: 2
     kernelSize: 4
-    activation: Tanh
+    activation: Tanh #TODO activation = RElU
 
   decoder:
     depth: 16
@@ -89,6 +89,15 @@ dreamer:
     numLayers: 3
     activation: Tanh
 
+  minecraft:
+    fov: 90
+    full_scene_size: 256, 256, 32
+    prediction_head:
+      dilations: 1, 2, 3
+      feature_size: 128
+
+
+
 folderNames:
   metricsFolder: metrics
   plotsFolder: plots
@@ -96,5 +105,3 @@ folderNames:
   videosFolder: videos
 
 
-minecraft:
-  fov:
