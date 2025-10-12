@@ -235,6 +235,13 @@
                         <xs:attribute name="foodSaturation" type="xs:float" use="optional" />
                     </xs:complexType>
                 </xs:element>
+                <xs:element name="LowLevelInputs" type="xs:boolean" default="false" minOccurs="0" maxOccurs="1">
+                    <xs:annotation>
+                        <xs:documentation>
+                            If set to true, inputs to malmo are disabled and instead given via a virtual keyboard and mouse (instead of higher level commands)
+                        </xs:documentation>
+                    </xs:annotation>
+                </xs:element>
             </xs:all>
         </xs:complexType>
     </xs:element>
@@ -439,6 +446,9 @@
             <xs:element ref="ObservationFromFullInventory" minOccurs="0"/>
             <xs:element ref="ObservationFromFullStats" minOccurs="0"/>
             <xs:element ref="ObservationFromGrid" minOccurs="0"/>
+            <xs:element ref="ObservationFromBlocksStream" minOccurs="0"/>
+            <xs:element ref="ObservationFromBlockStateRegistry" minOccurs="0"/>
+            <xs:element ref="CommandsForRequestingObservation" minOccurs="0"/>
             <xs:element ref="ObservationFromHotBar" minOccurs="0"/>
             <xs:element ref="ObservationFromHuman" minOccurs="0"/>
             <xs:element ref="ObservationFromDamage" minOccurs="0"/>

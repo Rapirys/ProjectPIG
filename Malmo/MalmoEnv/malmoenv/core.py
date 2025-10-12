@@ -1,21 +1,22 @@
 # ------------------------------------------------------------------------------------------------
 # Copyright (c) 2018 Microsoft Corporation
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
 # associated documentation files (the "Software"), to deal in the Software without restriction,
 # including without limitation the rights to use, copy, modify, merge, publish, distribute,
 # sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all copies or
 # substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
 # NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
 # NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
 # DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # ------------------------------------------------------------------------------------------------
+import json
 
 from lxml import etree
 import struct
@@ -97,20 +98,22 @@ class Env:
         self.server2 = self.server  # optional server for agent (role <> 0)
         self.port2 = self.port + self.role  # optional server port for agent
         self.resync_period = 0
-        self.turn_key = ""
         self.exp_uid = ""
         self.done = True
-        self.step_options = None
+        self.step_options = None          # use 0 (info included) TODO
         self.width = 0
         self.height = 0
         self.depth = 0
         self.reshape = reshape
         self.last_obs = None
+        self.synchronous = True           # whether to use synchronous ticking
+        self.seed_value = None  # optional per-episode seed
 
     def init(self, xml, port, server=None,
              server2=None, port2=None,
              role=0, exp_uid=None, episode=0,
-             action_filter=None, resync=0, step_options=0, action_space=None, reshape=False):
+             action_filter=None, resync=0, step_options=0, action_space=None,
+             reshape=False, synchronous=True):
         """"Initialize a Malmo environment.
             xml - the mission xml.
             port - the MalmoEnv service's port.
@@ -121,9 +124,10 @@ class Env:
             exp_uid - the experiment's unique identifier. Generated if not given.
             episode - the "reset" start count for experiment re-starts. Defaults to 0.
             action_filter - an optional list of valid actions to filter by. Defaults to simple commands.
-            step_options - encodes withTurnKey and withInfo in step messages. Defaults to info included,
-            turn if required.
+            step_options - encodes info in step messages. In new protocol we use 0 (info included).
         """
+        self.synchronous = synchronous
+
         if action_filter is None:
             action_filter = {"move", "turn", "use", "attack"}
 
@@ -143,7 +147,6 @@ class Env:
         command_parser = CommandParser(action_filter)
         commands = command_parser.get_commands_from_xml(self.xml, self.role)
         actions = command_parser.get_actions(commands)
-        # print("role " + str(self.role) + " actions " + str(actions)
 
         if action_space:
             self.action_space = action_space
@@ -163,17 +166,13 @@ class Env:
             self.port2 = self.port + self.role
 
         self.agent_count = len(self.xml.findall(self.ns + 'AgentSection'))
-        turn_based = self.xml.find('.//' + self.ns + 'TurnBasedCommands') is not None
-        if turn_based:
-            self.turn_key = 'AKWozEre'
-        else:
-            self.turn_key = ""
+
+        # Turn-based commands / turn keys are obsolete in the new protocol.
         if step_options is None:
-            self.step_options = 0 if not turn_based else 2
+            self.step_options = 0
         else:
             self.step_options = step_options
         self.done = True
-        # print("agent count " + str(self.agent_count) + " turn based  " + turn_based)
         self.resync_period = resync
         self.resets = episode
 
@@ -214,38 +213,39 @@ class Env:
         video_producer = video_producers[self.role]
         self.width = int(video_producer.find(self.ns + 'Width').text)
         self.height = int(video_producer.find(self.ns + 'Height').text)
-        want_depth = video_producer.attrib["want_depth"]
+        want_depth = video_producer.attrib.get("want_depth")
         self.depth = 4 if want_depth is not None and (want_depth == "true" or want_depth == "1") else 3
-        # print(str(self.width) + "x" + str(self.height) + "x" + str(self.depth))
         self.observation_space = VisualObservationSpace(self.width, self.height, self.depth)
-        # print(etree.tostring(self.xml))
 
     @staticmethod
     def _hello(sock):
         comms.send_message(sock, ("<MalmoEnv" + malmo_version + "/>").encode())
 
+
+    i=1
     def reset(self):
         """gym api reset"""
 
         if self.resync_period > 0 and (self.resets + 1) % self.resync_period == 0:
             self.exit_resync()
 
-        while not self.done:
+        if self.client_socket or not self.done:
             self.done = self._quit_episode()
             if not self.done:
                 time.sleep(0.1)
 
+        i=self.i+1
         return self._start_up()
 
     @retry
     def _start_up(self):
         self.last_obs = None
         self.resets += 1
+
         if self.role != 0:
             self._find_server()
         if not self.client_socket:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # print("connect " + self.server2 + ":" + str(self.port2))
             sock.connect((self.server2, self.port2))
             self._hello(sock)
             self.client_socket = sock  # Now retries will use connected socket.
@@ -254,38 +254,72 @@ class Env:
         return self._peek_obs()
 
     def _peek_obs(self):
+        """Initial observation fetch. New protocol returns obs, then info JSON, then done byte."""
         obs = None
+        malmo_info = "{}"
+        world_state_bytes = None
         start_time = time.time()
+
+        # comms.send_message()
+
         while not self.done and (obs is None or len(obs) == 0):
             peek_message = "<Peek/>"
             comms.send_message(self.client_socket, peek_message.encode())
+
             obs = comms.recv_message(self.client_socket)
+            malmo_info = comms.recv_message(self.client_socket).decode('utf-8')
+            world_state_bytes = comms.recv_message(self.client_socket)
+
+            # 3) Done byte (length-prefixed 1 byte)
             reply = comms.recv_message(self.client_socket)
             done, = struct.unpack('!b', reply)
             self.done = done == 1
+
             if obs is None or len(obs) == 0:
                 if time.time() - start_time > MAX_WAIT:
-                    self.client_socket.close()
-                    self.client_socket = None
+                    if self.client_socket:
+                        self.client_socket.close()
+                        self.client_socket = None
                     raise MissionInitException('too long waiting for first observation')
                 time.sleep(0.1)
 
-            obs = np.frombuffer(obs, dtype=np.uint8)
+            if obs is not None:
+                obs = np.frombuffer(obs, dtype=np.uint8)
 
-        if obs is None or len(obs) == 0 or obs.size == 0:
+        if obs is None or len(obs) == 0 or (hasattr(obs, "size") and obs.size == 0):
             if self.reshape:
                 obs = np.zeros((self.height, self.width, self.depth), dtype=np.uint8)
-            else: 
+            else:
                 obs = np.zeros(self.height * self.width * self.depth, dtype=np.uint8)
         elif self.reshape:
             obs = obs.reshape((self.height, self.width, self.depth)).astype(np.uint8)
         self.last_obs = obs
-        return obs
+        info = self._parse_malmo_info_dict(malmo_info)
+        if world_state_bytes is not None:
+            info["world_observation"] = world_state_bytes
+        return obs, info
 
     def _quit_episode(self):
-        comms.send_message(self.client_socket, "<Quit/>".encode())
-        reply = comms.recv_message(self.client_socket)
-        ok, = struct.unpack('!I', reply)
+        ok = 0
+        if self.client_socket:
+                comms.send_message(self.client_socket, b"<Quit/>")
+                reply = comms.recv_message(self.client_socket)  # '!I'
+                (ok,) = struct.unpack("!I", reply)
+        if self.client_socket:
+            try:
+                 comms.send_message(self.client_socket, b"<Disconnect/>")
+            except Exception:
+             pass
+            try:
+             self.client_socket.shutdown(socket.SHUT_RDWR)
+            except Exception:
+             pass
+            try:
+                self.client_socket.close()
+            except Exception:
+                pass
+            self.client_socket = None
+
         return ok != 0
 
     def render(self, mode=None):
@@ -295,58 +329,72 @@ class Env:
                 self.last_obs = np.zeros((self.height, self.width, self.depth), dtype=np.uint8)
             else:
                 self.last_obs = np.zeros(self.height * self.width * self.depth, dtype=np.uint8)
-
         return np.flipud(self.last_obs)
 
     def seed(self):
+        """Kept for API compatibility (no-op here)."""
         pass
 
+    def set_episode_seed(self, seed: int | None):
+        """Set an integer seed to send with MissionInit token on the next reset()."""
+        self.seed_value = seed
+
     def step(self, action):
-        """gym api step"""
-        obs = None
-        reward = None
-        info = None
-        turn = True
-        withturnkey = self.step_options < 2
-        withinfo = self.step_options == 0 or self.step_options == 2
+        """gym api step (synchronous protocol)
 
-        while not self.done and \
-                ((obs is None or len(obs) == 0) or
-                 (withinfo and info is None) or turn):
-            step_message = "<Step" + str(self.step_options) + ">" + \
-                           self.action_space[action] + \
-                           "</Step" + str(self.step_options) + " >"
-            comms.send_message(self.client_socket, step_message.encode())
-            if withturnkey:
-                comms.send_message(self.client_socket, self.turn_key.encode())
-            obs = comms.recv_message(self.client_socket)
+        1) send <StepClient{step_options}>...actions...</StepClient...>
+        2) receive: obs (bytes), then packed reward/done/sent, then info json
+        3) send <StepServer></StepServer> to advance the server tick
+        """
+        with_info = (self.step_options & 1) != 1
+        with_world_state = (self.step_options & 4) != 4
 
-            reply = comms.recv_message(self.client_socket)
-            reward, done, sent = struct.unpack('!dbb', reply)
-            self.done = done == 1
-            if withinfo:
-                info = comms.recv_message(self.client_socket).decode('utf-8')
+        if self.done:
+            # Return the last obs to be safe; typical Gym usage expects users to reset.
+            safe_obs = self.last_obs if self.last_obs is not None else (
+                np.zeros((self.height, self.width, self.depth), dtype=np.uint8) if self.reshape
+                else np.zeros(self.height * self.width * self.depth, dtype=np.uint8)
+            )
+            return safe_obs, 0.0, True, "{}"
 
-            turn_key = comms.recv_message(self.client_socket).decode('utf-8') if withturnkey else ""
-            # print("[" + str(self.role) + "] TK " + turn_key + " self.TK " + str(self.turn_key))
-            if turn_key != "":
-                if sent != 0:
-                    turn = False
-                # Done turns if: turn = self.turn_key == turn_key
-                self.turn_key = turn_key
-            else:
-                turn = sent == 0
+        # Build and send StepClient message (include info; step_options==0)
+        step_message = "<StepClient" + str(self.step_options) + ">" + \
+                       self.action_space[action] + \
+                       "</StepClient" + str(self.step_options) + " >"
+        comms.send_message(self.client_socket, step_message.encode())
 
-            if (obs is None or len(obs) == 0) or turn:
-                time.sleep(0.1)
-            obs = np.frombuffer(obs, dtype=np.uint8)
+        # Receive observation frame
+        raw_obs = comms.recv_message(self.client_socket)
 
+        # Receive reward/done/sent triple
+        reply = comms.recv_message(self.client_socket)
+        reward, done_flag, sent = struct.unpack('!dbb', reply)
+        self.done = (done_flag == 1)
+
+        # Receive info JSON
+        malmo_info = "{}"
+        if with_info:
+            malmo_info = comms.recv_message(self.client_socket).decode('utf-8')
+
+        world_state_bytes = None
+        if with_world_state:
+            world_state_bytes = comms.recv_message(self.client_socket)
+
+        # Advance the server tick (no response expected)
+        comms.send_message(self.client_socket, "<StepServer></StepServer>".encode())
+
+        # Shape observation
+        obs = np.frombuffer(raw_obs, dtype=np.uint8) if raw_obs is not None else np.array([], dtype=np.uint8)
         if self.reshape:
             if obs.size == 0:
                 obs = np.zeros((self.height, self.width, self.depth), dtype=np.uint8)
             else:
                 obs = obs.reshape((self.height, self.width, self.depth)).astype(np.uint8)
         self.last_obs = obs
+
+        info = self._parse_malmo_info_dict(malmo_info)
+        if world_state_bytes is not None:
+            info["world_observation"] = world_state_bytes
 
         return obs, reward, self.done, info
 
@@ -467,29 +515,48 @@ class Env:
                     raise MissionInitException('too long finding mission to join')
                 time.sleep(1)
         sock.close()
-        # print("Found mission integrated server port " + str(port))
         self.integratedServerPort = port
         e = self.xml.find(self.ns + 'MinecraftServerConnection')
         if e is not None:
             e.attrib['port'] = str(self.integratedServerPort)
 
     def _init_mission(self):
+        """Send XML and new-style token: exp:role:resets:agentCount:isSynchronous[:seed]"""
         ok = 0
         while ok != 1:
             xml = etree.tostring(self.xml)
-            token = (self._get_token() + ":" + str(self.agent_count)).encode()
-            # print(xml.decode())
+
+            token_parts = [
+                self._get_token(),                    # exp_uid:role:resets
+                str(self.agent_count),                # agent count
+                str(bool(self.synchronous)).lower()   # "true"/"false"
+            ]
+            if self.seed_value is not None:
+                token_parts.append(str(int(self.seed_value)))
+
+            token = (":".join(token_parts)).encode()
+
             comms.send_message(self.client_socket, xml)
             comms.send_message(self.client_socket, token)
 
             reply = comms.recv_message(self.client_socket)
             ok, = struct.unpack('!I', reply)
-            self.turn_key = comms.recv_message(self.client_socket).decode('utf-8')
+
+            # New server no longer replies with a turn key here.
             if ok != 1:
                 time.sleep(1)
 
     def _get_token(self):
         return self.exp_uid + ":" + str(self.role) + ":" + str(self.resets)
+
+    def _parse_malmo_info_dict(self, malmo_info_str: str) -> dict:
+        """Parse Malmo info JSON into a dict; fall back to {} on error."""
+        try:
+            # Malmo sometimes sends an empty string or "{}"
+            return json.loads(malmo_info_str) if malmo_info_str else {}
+        except Exception:
+            print("WARN: Error parsing info as json")
+            return {}
 
 
 def make():

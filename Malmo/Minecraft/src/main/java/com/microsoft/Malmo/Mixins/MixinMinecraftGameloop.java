@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.FutureTask;
 
+import com.microsoft.Malmo.Client.PostRenderEvent;
+import com.microsoft.Malmo.MalmoMod;
 import com.microsoft.Malmo.Utils.TimeHelper;
 
 import org.lwjgl.opengl.Display;
@@ -167,7 +169,7 @@ public abstract class MixinMinecraftGameloop {
 
         
         //Speeds up rendering; though it feels necessary. s
-        if(!TimeHelper.SyncManager.isSynchronous()){
+        if(!TimeHelper.SyncManager.isSynchronous() || MalmoMod.isLowLevelInput()){
         GlStateManager.pushMatrix();
         GlStateManager.clear(16640);
         this.framebufferMc.bindFramebuffer(true);
@@ -183,6 +185,8 @@ public abstract class MixinMinecraftGameloop {
             net.minecraftforge.fml.common.FMLCommonHandler.instance().onRenderTickStart(this.timer.renderPartialTicks);
             this.mcProfiler.endStartSection("gameRenderer");
             this.entityRenderer.updateCameraAndRender(this.timer.renderPartialTicks, i);
+            Minecraft mc = Minecraft.getMinecraft();
+            MinecraftForge.EVENT_BUS.post(new PostRenderEvent(this.timer.renderPartialTicks));
             this.mcProfiler.endSection();
             net.minecraftforge.fml.common.FMLCommonHandler.instance().onRenderTickEnd(this.timer.renderPartialTicks);
         }
@@ -206,7 +210,7 @@ public abstract class MixinMinecraftGameloop {
         }
 
         // Speeds up rendering!
-        if(!TimeHelper.SyncManager.isSynchronous()){
+        if(!TimeHelper.SyncManager.isSynchronous() || MalmoMod.isLowLevelInput()){
             // TODO: IF WE WANT TO ENABLE AGENT GUI WE SHOULD LET THIS CODE RUN
             this.guiAchievement.updateAchievementWindow();
             this.framebufferMc.unbindFramebuffer();
@@ -275,7 +279,7 @@ public abstract class MixinMinecraftGameloop {
         if (!this.inGameHasFocus) {
             this.inGameHasFocus = true;
             this.displayGuiScreen((GuiScreen) null);
-            this.leftClickCounter = 0;
+            this.leftClickCounter = 10000;
         }
     }
 }

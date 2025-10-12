@@ -42,12 +42,7 @@ class CleanGymWrapper(gym.Wrapper):
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         done = terminated or truncated
-        return obs, reward, done
-
-    def reset(self, seed=None):
-        obs, info = self.env.reset(seed=seed)
-        return obs
-
+        return obs, reward, done, info
 
 class FlatDictActionSpace(gym.ActionWrapper):
     """
@@ -115,6 +110,19 @@ class FlatDictActionSpace(gym.ActionWrapper):
         return out
 
 
+class MinecraftWrapper(gym.ObservationWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        observationSpace = self.observation_space
+        newObsShape = observationSpace.shape[-1:] + observationSpace.shape[:2]
+        self.observation_space = gym.spaces.Box(low=0, high=1, shape=newObsShape, dtype=np.float32)
+
+    def observation(self, observation):
+        observation = np.transpose(observation, (2, 0, 1))/255.0
+        return observation
+
+
+
 class MalmoAdapter(gym.Env):
     metadata = {"render_modes": ["rgb_array"]}
 
@@ -124,7 +132,7 @@ class MalmoAdapter(gym.Env):
         self.action_space = malmo_env.action_space
         self.observation_space = malmo_env.observation_space
 
-    def reset(self, *, seed=None, options=None): return self.env.reset(), {}  # Gymnasium requires (obs, info)
+    def reset(self, *, seed=None, options=None): return self.env.reset()  # Gymnasium requires (obs, info)
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
         return obs, reward, bool(done), False, info #The info is likely to be json string, not dict
@@ -140,7 +148,7 @@ def make_env(config):
         eval_base = gym.make(environment_name, render_mode="rgb_array")
 
     if environment_name in {"Minecraft"}:
-        xml = Path("../Malmo/MalmoEnv/missions/findthegoal.xml").read_text()
+        xml = Path("../Malmo/MalmoEnv/missions/mobchase_single_agent.xml").read_text() #findthegoal.xml
         base = malmoenv.make()
         base.init(
             xml,
@@ -151,8 +159,7 @@ def make_env(config):
             role=0,
             exp_uid="test1",
             episode=0,
-
-            resync=0, reshape=True, ) #TODO disable info via step_options
+            resync=0, reshape=True, )
 
         base = TransformAction(
             MalmoAdapter(base),
@@ -164,5 +171,5 @@ def make_env(config):
 
     # TODO Different resize for minecraft
     env = CleanGymWrapper(GymPixelsProcessingWrapper(gym.wrappers.ResizeObservation(base, (64, 64))))
-    env_eval = CleanGymWrapper(GymPixelsProcessingWrapper(gym.wrappers.ResizeObservation(eval_base, (64, 64))))
+    env_eval = CleanGymWrapper(GymPixelsProcessingWrapper(MinecraftWrapper(gym.wrappers.ResizeObservation(eval_base, (64, 64)))))
     return env, env_eval
