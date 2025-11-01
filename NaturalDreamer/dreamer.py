@@ -4,7 +4,12 @@ from torch.distributions import kl_divergence, Independent, OneHotCategoricalStr
 import numpy as np
 import os
 
-from NaturalDreamer.minecraft import TestBlockPositionDecoding
+from NaturalDreamer.minecraft.loss import CE_ssc_loss
+from NaturalDreamer.minecraft.minecraft import MinecraftSegmentationHead, get_classes
+from NaturalDreamer.minecraft.utils import (
+    extract_camera_position_from_info,
+    build_globalid_to_blockid_lut,
+)
 from malmoenv.world_tracking.utils import decode_world_update
 from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, ContinueModel, EncoderConv, DecoderConv, Actor, Critic, \
     HybridActor
@@ -60,7 +65,8 @@ class Dreamer:
         self.totalGradientSteps = 0
 
         self.block_state_registry = None
-        self.testBlockPositionDecoding = None
+        self.block_state_registry_lut = None
+        self.minecraftSegmentationHead = None
 
     def _flat_action(self, a: dict):
         # TODO Review if there a better place
@@ -75,8 +81,9 @@ class Dreamer:
         previousLatentState = torch.zeros(self.config.batchSize, self.latentSize, device=self.device)
 
         recurrentStates, priorsLogits, posteriors, posteriorsLogits = [], [], [], []
+        reconstruction3DLoss = 0
         for t in range(1, self.config.batchLength):
-            first_t = data.is_first[:, t].float().unsqueeze(-1)
+            first_t = data.is_first[:, t].float()
 
             # Reset the recurrent + latent state for rows that start here
             previousRecurrentState = previousRecurrentState * (1.0 - first_t)
@@ -92,7 +99,25 @@ class Dreamer:
             posteriorsLogits.append(posteriorLogits)
 
             previousRecurrentState = recurrentState
-            previousLatentState    = posterior
+            previousLatentState = posterior
+
+            camera_position, grid_origin, grid = next(data.world_trajectories)
+            grid_origin = torch.from_numpy(grid_origin).to(self.device)
+            grid = torch.from_numpy(grid).to(self.device)  # torch.Size([1, 20, 20, 20])
+            #TODO delerr
+            # target[1][5].to(device='cpu').numpy()
+            # grid_origin[1].to(device='cpu').numpy() [-10, 49, -10]
+            # camera_position[1] [0.9146066904067993, 56.619998931884766, 0.7888732552528381, 234.0, 0.0]
+            # gold at 2 56 12
+            block_id_grid = self.block_state_registry_lut[grid.long()] #TODO Do not need this maping in final version
+            full_state_step = torch.cat((recurrentState, posterior), dim=-1)
+            reconstruction3DLatent = self.minecraftSegmentationHead(full_state_step, camera_position, grid_origin)
+            #
+            H, W, D = block_id_grid.shape[1:]
+            num_classes = reconstruction3DLatent.shape[1]
+            class_weight = torch.ones(num_classes, device=self.device)
+            #TODO may be croped on top
+            reconstruction3DLoss = CE_ssc_loss(reconstruction3DLatent[:, :, :H, :, :], block_id_grid.long(), class_weight)
 
         recurrentStates             = torch.stack(recurrentStates,              dim=1) # (batchSize, batchLength-1, recurrentSize)
         priorsLogits                = torch.stack(priorsLogits,                 dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
@@ -120,7 +145,7 @@ class Dreamer:
         posteriorLoss   = self.config.betaPosterior*torch.maximum(posteriorLoss, freeNats)
         klLoss          = (priorLoss + posteriorLoss).mean()
 
-        worldModelLoss =  reconstructionLoss + rewardLoss + klLoss # I think that the reconstruction loss is relatively a bit too high (11k) 
+        worldModelLoss =  reconstructionLoss + rewardLoss + klLoss + reconstruction3DLoss # I think that the reconstruction loss is relatively a bit too high (11k)
         
         if self.config.useContinuationPrediction:
             # TODO The useContinuationPrediction will not work. The bug from natural dreamer implementation
@@ -204,9 +229,12 @@ class Dreamer:
 
 
             self.block_state_registry = info["BlockStateRegistry"]
-            self.testBlockPositionDecoding = TestBlockPositionDecoding(self.config)
+            self.block_state_registry_lut = build_globalid_to_blockid_lut(self.block_state_registry, self.device)
+            self.minecraftSegmentationHead = MinecraftSegmentationHead(self.config, self.device, self.fullStateSize,
+                                                                       self.observationShape, get_classes(self.block_state_registry))
 
             world_state = decode_world_update(info["world_observation"])
+            camera_position = extract_camera_position_from_info(info)
             encodedObservation = self.encoder(torch.from_numpy(observation).float().unsqueeze(0).to(self.device))
 
             currentScore, stepCount, done, is_first, frames = 0, 0, False, True, []
@@ -219,10 +247,9 @@ class Dreamer:
                 prevActionVec = actionFlat
 
                 if not evaluation:
-                    #TODO add world_state to buffer
-                    self.testBlockPositionDecoding.compute(info)
-                    self.buffer.add(observation, world_state, prevActionVec.cpu().numpy().reshape(-1), reward, done, is_first)
+                    self.buffer.add(observation, world_state, camera_position, prevActionVec.cpu().numpy().reshape(-1), reward, done, is_first)
                     world_state = decode_world_update(info["world_observation"])
+                    camera_position = extract_camera_position_from_info(info)
                 is_first = False
 
                 if saveVideo and i == 0:

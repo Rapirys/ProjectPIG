@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 import torch
 from typing import Tuple
 
@@ -7,15 +8,11 @@ from typing import Tuple
 def make_voxel_centers(vox_origin: torch.Tensor,
                        scene_size: Tuple[float, float, float],
                        voxel_size = 1, device=None, dtype=torch.float32):
-    """
-    Minecraft world convention: X (east-west), Y up, Z (south-north).
-    vox_origin is the **min corner** of the axis-aligned box (x_min, y_min, z_min).
-    Returns: centers_w (N, 3), vol_dim (3,) ints.
-    """
-    device = device if device is not None else vox_origin.device
-    scene_size = torch.tensor(scene_size, device=device, dtype=dtype)
 
-    vol_dim = torch.ceil(scene_size / voxel_size).to(dtype=torch.int64)  # (3,)
+    device = device if device is not None else vox_origin.device
+    scene_size_t = torch.tensor(scene_size, device=device, dtype=dtype)
+
+    vol_dim = torch.ceil(scene_size_t / voxel_size).to(dtype=torch.int64)  # (3,)
     nx, ny, nz = int(vol_dim[0]), int(vol_dim[1]), int(vol_dim[2])
 
     grid = torch.stack(torch.meshgrid(
@@ -25,14 +22,14 @@ def make_voxel_centers(vox_origin: torch.Tensor,
         indexing='ij'
     ), dim=-1).to(dtype).reshape(-1, 3)
 
-    centers = vox_origin.to(dtype) + (grid + 0.5) * float(voxel_size)  # (N,3)
+    centers = vox_origin.to(dtype)[:, None, :] + (grid[None, :, :] + 0.5) * float(voxel_size)
     return centers, vol_dim
 
 @torch.no_grad()
 def vox2pix(
     cam_E: torch.Tensor,  # (B,4,4) world-> , camera pose
     cam_K: torch.Tensor,  # (3,3) camera intrinsics
-    vox_origin,  # (3,) min corner (x_min,y_min,z_min), tensor or tuple/list
+    vox_origin: torch.Tensor,  # (3,) min corner (x_min,y_min,z_min), tensor or tuple/list
     img_W: int, img_H: int,  # ints
     scene_size: Tuple[float, float, float],  # (size_x, size_y, size_z) meters
     device=None, dtype=torch.float32):
@@ -50,14 +47,14 @@ def vox2pix(
 
     # centers_world voxel centers (N,3) in WORLD, plus dims
     centers_world, vol_dim = make_voxel_centers(vox_origin, scene_size, device=device, dtype=dtype)  # (N,3)
-    N = centers_world.shape[0]
+    N = centers_world.shape[1]
 
     # 1) World → Camera (homogeneous coordinates)
-    ones_col = torch.ones((N, 1), device=centers_world.device, dtype=centers_world.dtype)
-    points_world_h = torch.cat([centers_world, ones_col], dim=1).expand(B, N, 4)
+    ones_col = torch.ones((B, N, 1), device=device, dtype=dtype)
+    points_world_h = torch.cat([centers_world, ones_col], dim=2)
 
     # Right-multiply row vectors by cam_E^T
-    points_camera_h = torch.bmm(points_world_h, cam_E.transpose(1, 2))     # (B, N, 4)
+    points_camera_h = torch.matmul(points_world_h, cam_E.transpose(1, 2))     # (B, N, 4)
 
     # 2) Camera → Pixel (pinhole projection)
     camera_xyz = points_camera_h[..., :3]
@@ -84,6 +81,7 @@ def vox2pix(
 def intrinsics_from_fov(W: int, H: int, hfov_deg: float, vfov_deg: float,
                         device=None, dtype=torch.float32) -> torch.Tensor:
     """Return a 3x3 pinhole K from FOVs (OpenCV-style: cx=W/2, cy=H/2)."""
+    #TODO rewrite with PyTorch3D or scypy
     hfov = math.radians(hfov_deg)
     vfov = math.radians(vfov_deg)
     fx = W / (2.0 * math.tan(hfov / 2.0))
@@ -96,18 +94,57 @@ def intrinsics_from_fov(W: int, H: int, hfov_deg: float, vfov_deg: float,
     return K
 
 
-@torch.no_grad()
-def compute_vox_origin_batch(
-    player_xyz: torch.Tensor,                 # (B,3)
-    scene_size: Tuple[float, float, float],
-    chunk_size: int = 16,
-) -> torch.Tensor:
+def extrinsics_from_player_position(pose: np.ndarray) -> np.ndarray:
+    """
+    pose: (B,5) -> [x, y, z, yaw_deg, pitch_deg]
+    World: X east-west, Y up, Z south-north; camera +Z forward.
+    yaw_deg: clockwise from south; pitch_deg: down positive.
+    Returns: cam_E (B,4,4) world→camera.
+    """
+    #TODO rewrite with PyTorch3D or scypy
+    P = np.asarray(pose, dtype=np.float32)
+    if P.ndim == 1: P = P[None, :]                      # (1,5) if single
+    X, Y, Z, yaw_deg, pitch_deg = P.T
 
-    size_x, size_y, size_z = scene_size
-    min_chunk_x = (player_xyz[:, 0] // chunk_size) * chunk_size  - (size_x // 2)
-    min_chunk_z = (player_xyz[:, 2] // chunk_size) * chunk_size - (size_z // 2)
+    # angles
+    yaw   = np.deg2rad(-yaw_deg)                        # invert -> CCW+
+    pitch = np.deg2rad(pitch_deg)
+    cy, sy = np.cos(yaw),   np.sin(yaw)
+    cp, sp = np.cos(pitch), np.sin(pitch)
 
-    half_y = size_y // 2
-    min_chunk_y = torch.clamp(torch.floor(player_xyz[:, 1] - half_y), min=0)
+    B = P.shape[0]
+    Ry = np.zeros((B,3,3), dtype=np.float32)
+    Ry[:,0,0], Ry[:,0,2], Ry[:,1,1], Ry[:,2,0], Ry[:,2,2] = cy, sy, 1.0, -sy, cy
 
-    return torch.stack([min_chunk_x, min_chunk_y, min_chunk_z], dim=-1)
+    Rx = np.zeros((B,3,3), dtype=np.float32)
+    Rx[:,0,0], Rx[:,1,1], Rx[:,1,2], Rx[:,2,1], Rx[:,2,2] = 1.0, cp, -sp, sp, cp
+
+    Rcw = np.einsum('bij,bjk->bik', Ry, Rx)             # camera→world
+    Rwc = np.transpose(Rcw, (0,2,1))                    # world→camera (inverse)
+
+    t   = np.stack([X, Y, Z], axis=-1)                  # (B,3)
+    twc = -np.einsum('bij,bj->bi', Rwc, t)              # world→camera translation
+
+    E = np.zeros((B,4,4), dtype=np.float32)
+    E[:, :3, :3] = Rwc
+    E[:, :3,  3] = twc
+    E[:,  3,  3] = 1.0
+    return E
+
+
+def extract_camera_position_from_info(info) -> np.ndarray:
+    return np.asarray([info["xpos"], info["ypos"] + 1.62, info["zpos"], info["yaw"], info["pitch"]], dtype=np.float32)
+
+
+def build_globalid_to_blockid_lut(block_state_registry, device=None):
+    max_gid = max(m['global_id']
+                  for b in block_state_registry['blocks']
+                  for m in b['metas'])
+    lut = torch.full((max_gid + 1,), -1, dtype=torch.long, device=device)
+
+    for b in block_state_registry['blocks']:
+        bid = b['block_id']
+        for m in b['metas']:
+            lut[m['global_id']] = bid
+
+    return lut

@@ -1,8 +1,8 @@
-from collections import deque
+from collections import deque, OrderedDict
 from dataclasses import dataclass, field
-from typing import List, Dict, Tuple, Optional
+from itertools import chain
+from typing import List, Dict, Tuple, Optional, Iterator
 import numpy as np
-
 from malmoenv.world_tracking.utils import SectionBlob, WorldUpdate
 
 
@@ -13,45 +13,54 @@ class ActiveChunk:
     loaded_on_tick: int
     sections: List[SectionBlob]
     unloaded_on_tick: Optional[int] = None
-    # store single-block updates as (tick, x, y, z, state)
-    updates: List[Tuple[int, int, int, int, int]] = field(default_factory=list)
+    updates: List[Tuple[int, int, int, int, int]] = field(default_factory=list)  # tick, x, y, z, state
+    tick_lookup: OrderedDict[int, List[int]] = field(default_factory=OrderedDict)
 
     def append_update(self, tick: int, x: int, y: int, z: int, state: int) -> None:
         self.updates.append((tick, x, y, z, state))
+        self.tick_lookup.setdefault(tick, []).append(len(self.updates) - 1)
 
 
-
-# ---- World buffer ------------------------------------------------------------
+    # ---- World buffer ------------------------------------------------------------
 class WorldTrajectory:
     def __init__(self) -> None:
         self.chunks: List[ActiveChunk] = []
-        self.tick_views: List[Dict[Tuple[int, int], int]] = []
+        self.added: List[List[int]] = []
+        self.removed: List[List[int]] = []
+        self.tick_views: List[List[int]] = []
         self.current_view: Dict[Tuple[int, int], int] = {}
         self.age = -1
+        self.camera_positions: List[np.ndarray] = [] #Shape (len, 5): #X, Y,Z , yaw, pitch
 
 
-    def add_update(self, world_update: WorldUpdate) -> None:
+    def add_update(self, world_update: WorldUpdate, camera_position: np.ndarray) -> None:
         """Append one tick of updates (loads/unloads/single-block edits)."""
         self.age += 1
         tick = self.age
 
-        # 1) Handle unloads first: mark and remove from current view.
+        # unloads
+        removed = []
         for event in world_update.chunk_unloads:
             key = (event.cx, event.cz)
             idx = self.current_view.pop(key, None)
             if idx is not None:
                 self.chunks[idx].unloaded_on_tick = tick
+                removed.append(idx)
+        self.removed.append(removed)
 
-        # 2) Handle loads: create new ActiveChunk incarnations and add to current view.
+        # loads
+        added = []
         for event in world_update.chunk_loads:
             chunk = ActiveChunk(cx=event.cx, cz=event.cz, loaded_on_tick=tick, sections=list(event.sections))
             self.chunks.append(chunk)
-            self.current_view[(event.cx, event.cz)] = len(self.chunks) - 1
+            idx = len(self.chunks) - 1
+            self.current_view[(event.cx, event.cz)] = idx
+            added.append(idx)
+        self.added.append(added)
 
-        # 3) Handle single-block updates: route to the currently active chunk for that (cx,cz).
+        # single-block edits
         if world_update.block_updates is not None and world_update.block_updates.size > 0:
             block_updates = world_update.block_updates  # structured array with fields x,y,z,state
-            # Iterate rows (usually small); we keep it simple.
             for x, y, z, state in zip(block_updates["x"], block_updates["y"], block_updates["z"], block_updates["state"]):
                 cx = int(x) >> 4
                 cz = int(z) >> 4
@@ -61,46 +70,104 @@ class WorldTrajectory:
 
         # 4) Snapshot the current view for this tick.
         #    Store a shallow copy so later mutations don't affect past ticks.
-        self.tick_views.append(dict(self.current_view))
+        self.tick_views.append(list(self.current_view.values()))
+        self.camera_positions.append(camera_position)
 
+    def get_world_trajectory(self, scene_size: Tuple[float, float, float], start_tick: int = 0, end_tick: Optional[int] = None) -> Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        if end_tick is None:
+            end_tick = self.age
+        if start_tick < 0 or end_tick > self.age or start_tick > end_tick:
+            raise IndexError(f"tick range [{start_tick}, {end_tick}] out of bounds [0, {self.age}]")
 
-    def get_world_state(self, tick: int) -> Dict[Tuple[int, int], np.ndarray]:
-        """
-        Return a dictionary mapping (cx,cz) to a dense (256,16,16) uint16 array
-        representing the chunk content at the specified tick.
-        """
-        if tick < 0 or tick > self.age:
-            raise IndexError(f"tick {tick} out of range [0, {self.age}]")
+        sx, sy, sz = map(int, scene_size)
+        camera_positions_np = np.stack(self.camera_positions[start_tick:end_tick + 1])
+        origins = compute_vox_origin_batch_np(camera_positions_np, scene_size)
 
-        view = self.tick_views[tick]
-        result: Dict[Tuple[int, int], np.ndarray] = {}
+        chunk_view_iterator = self._get_world_trajectory(start_tick, end_tick)
+        for i, view in enumerate(chunk_view_iterator):
+            ox, oy, oz = origins[i]
+            ex, ey, ez = ox + sx, oy + sy, oz + sz
+            vol = np.zeros((sy, sx, sz), dtype=np.uint16)
 
-        for key, chunk_idx in view.items():
-            active_chunk = self.chunks[chunk_idx]
+            chunk_size = 16
+            for (ccx, ccz), chunk_arr in view.items():
+                base_x = ccx * chunk_size
+                base_z = ccz * chunk_size
 
-            # Start with empty air chunk [y=0..255, z=0..15, x=0..15]
-            chunk_arr = np.zeros((256, 16, 16), dtype=np.uint16)
+                # chunk AABB in world coords
+                x0, x1 = max(ox, base_x), min(ex, base_x + chunk_size)
+                z0, z1 = max(oz, base_z), min(ez, base_z + chunk_size)
+                y0, y1 = max(oy, 0), min(ey, 256)
+                if x0 >= x1 or y0 >= y1 or z0 >= z1:
+                    continue
 
-            # Decode each present section and place it at the right y-range.
-            for section in active_chunk.sections:
-                sy = int(section.sy) & 0x0F  # 0..15
-                sec_arr = section.as_numpy_array()
-                y0 = sy * 16
-                chunk_arr[y0 : y0 + 16, :, :] = sec_arr
+                # region indices
+                rx0, rx1 = x0 - ox, x1 - ox
+                rz0, rz1 = z0 - oz, z1 - oz
+                ry0, ry1 = y0 - oy, y1 - oy
 
-            # Apply single-block updates up to the requested tick.
-            for utick, x, y, z, state in active_chunk.updates:
-                if utick <= tick: #TODO can be slightly optimised by vectorising updates
-                    ly = int(y)
-                    lx = int(x) & 15
-                    lz = int(z) & 15
-                    if 0 <= ly < 256:
-                        chunk_arr[ly, lz, lx] = np.uint16(state & 0xFFFF)
+                # chunk indices (chunk_arr is [Y, X, Z] with X,Z local to chunk)
+                lx0, lx1 = x0 - base_x, x1 - base_x
+                lz0, lz1 = z0 - base_z, z1 - base_z
+                ly0, ly1 = y0, y1
+                #TODO look like x and z axes are swaped and the x is reversed
+                vol[ry0:ry1, rz0:rz1, rx0:rx1] = chunk_arr[ly0:ly1, lz0:lz1, lx0:lx1]
 
-            result[key] = chunk_arr
+            yield camera_positions_np[i], origins[i], vol
 
-        return result
+    def _get_world_trajectory(self, start_tick: int, end_tick: int) -> Iterator[Dict[Tuple[int, int], np.ndarray]]:
+        view: Dict[Tuple[int, int], np.ndarray] = {}
+        view_iter: Dict[Tuple[int, int], Iterator[np.ndarray]] = {}
+        for chunk_idx in self.tick_views[start_tick]:
+            chunk = self.chunks[chunk_idx]
+            buffer, iterator = self.get_chunk_trajectory(chunk, start_tick=start_tick)
+            key = (chunk.cx, chunk.cz)
+            view[key] = buffer
+            view_iter[key] = iterator
 
+        for it in view_iter.values():
+            next(it)
+        yield view
+
+        for added_chunks, removed_chunks in zip(self.added[start_tick+1:end_tick+1], self.removed[start_tick+1:end_tick+1]):
+            for added_idx in added_chunks:
+                added = self.chunks[added_idx]
+                buffer, iterator = self.get_chunk_trajectory(added)
+                key = (added.cx, added.cz)
+                view[key] = buffer
+                view_iter[key] = iterator
+
+            for removed_idx in removed_chunks:
+                removed = self.chunks[removed_idx]
+                view.pop((removed.cx, removed.cz))
+                view_iter.pop((removed.cx, removed.cz))
+
+            for it in view_iter.values():
+                next(it)
+            yield view
+
+    def get_chunk_trajectory(self, chunk: ActiveChunk, start_tick: int = None) -> Tuple[np.ndarray, Iterator[np.ndarray]]:
+        #TODO Tream chunk hight early
+        chunk_arr = np.zeros((256, 16, 16), dtype=np.uint16)
+        start_tick = chunk.loaded_on_tick if start_tick is None else start_tick
+
+        for section in chunk.sections:
+            sy = int(section.sy) & 0x0F  # 0..15
+            sec_arr = section.as_numpy_array()
+            y0 = sy * 16
+            chunk_arr[y0 : y0 + 16, :, :] = sec_arr
+
+        def _iter() -> Iterator[np.ndarray]:
+
+            end = chunk.unloaded_on_tick if chunk.unloaded_on_tick is not None else self.age
+            for idx in range(chunk.loaded_on_tick, end + 1):
+                updates = [chunk.updates[i] for i in chunk.tick_lookup.get(idx, [])]
+                for utick, x, y, z, state in updates:
+                    chunk_arr[int(y), int(x) & 15, int(z) & 15] = np.uint16(state & 0xFFFF)
+                if idx >= start_tick:
+                    yield chunk_arr
+
+        return chunk_arr, _iter()
 
 @dataclass
 class _TrajectoryRecord:
@@ -117,39 +184,16 @@ class WorldBuffer:
     Prunes finished trajectories once they fall completely outside the replay capacity window.
     """
 
-    class TrajectoryView:
-        def __init__(self, world_buffer: "WorldBuffer", sample_index: np.ndarray) -> None:
-            self._world_buffer = world_buffer
-            self.sample_index = np.asarray(sample_index, dtype=np.int64)
-            if self.sample_index.ndim != 2:
-                raise ValueError("sample_index must be 2D (batchSize, sequenceSize)")
-
-        @property
-        def shape(self) -> Tuple[int, int]:
-            return tuple(self.sample_index.shape)  # (batch, time)
-
-        def get(self, batch: int, time: int):
-            """
-            Resolve the (batch, time) entry to a world state dict for that global tick.
-            Returns: Dict[(cx,cz) -> uint16[256,16,16]]
-            """
-            global_tick = int(self.sample_index[batch, time])
-            return self._world_buffer.get_world_state(global_tick)
-
-        def __getitem__(self, idx):
-            """Sugar: view[batch, time]."""
-            batch, time = idx
-            return self.get(batch, time)
-
     # ---- WorldBuffer proper ----
-    def __init__(self, capacity: int) -> None:
+    def __init__(self, capacity: int, scene_size: Tuple[float, float, float]) -> None:
         self.capacity = int(capacity)
+        self.scene_size = scene_size
         self._records: deque[_TrajectoryRecord] = deque()
         self._current: Optional[_TrajectoryRecord] = None  # current (open or just-closed) episode
         self._global_tick: int = -1                       # increases by 1 per append
 
     # ---- public API ----
-    def append_update(self, world_update: WorldUpdate, is_first: bool, done: bool) -> None:
+    def append_update(self, world_update: WorldUpdate, camera_position: np.ndarray, is_first: bool, done: bool) -> None:
         self._global_tick += 1
 
         # Start new episode?
@@ -160,8 +204,8 @@ class WorldBuffer:
             self._current = record
 
         # Append updates to the current episode
-        self._current.trajectory.add_update(world_update)
-        self._current.latest_tick = self._global_tick  # keep end updated even while open TODO
+        self._current.trajectory.add_update(world_update, camera_position)
+        self._current.latest_tick = self._global_tick  # keep end updated even while open
 
         # If episode ended, we simply leave the record as finished; the next reset will open a new one.
         self._current.done = done
@@ -169,20 +213,54 @@ class WorldBuffer:
         # Prune at most one oldest finished trajectory if it fell outside the window.
         self._prune_oldest_if_needed()
 
-    def get_world_state(self, global_tick: int) -> Dict[Tuple[int, int], np.ndarray]:
-        """
-        Return {(cx,cz): uint16[256,16,16]} for a given GLOBAL tick.
-        """
-        record, local_tick = self._locate_record_and_local_tick(global_tick)
-        return record.trajectory.get_world_state(local_tick)
-
-    def get_trajectories(self, sample_index: np.ndarray) -> "WorldBuffer.TrajectoryView":
+    def get_trajectories(self, sample_index: np.ndarray, start_mask: np.ndarray) -> Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """
         Return a lazy view that can resolve (batch, time) -> world state dicts on demand.
         """
-        return WorldBuffer.TrajectoryView(self, sample_index)
+        if sample_index.ndim != 2 or start_mask.ndim != 2:
+            raise ValueError("sample_index and start_mask must both be 2D (batch_size, batch_length)")
+        if sample_index.shape != start_mask.shape:
+            raise ValueError("sample_index and start_mask must have the same shape")
+        if start_mask.dtype != np.bool_:
+            raise ValueError("start_mask must be a boolean array")
 
-    # ---- internals ----
+        batch_size, batch_length = sample_index.shape
+        gens_idx = []
+        for i in range(batch_size):
+            gens_idx.append([])
+            start = int(sample_index[i, 0])
+            l = 1
+            for j in range(1, batch_length):
+                if start_mask[i, j]:
+                    gens_idx[i].append((start, l))
+                    start = int(sample_index[i, j])
+                    l = 0
+                l += 1
+            gens_idx[i].append((start, l))
+
+        gens_idx_test = []
+        for i in range(batch_size):
+            starts_cols = np.flatnonzero(start_mask[i])
+            if starts_cols.size == 0 or starts_cols[0] != 0:
+                starts_cols = np.r_[0, starts_cols]
+            lengths = np.diff(np.r_[starts_cols, batch_length])
+            row_pairs = [(int(sample_index[i, c]), int(l)) for c, l in zip(starts_cols, lengths)]
+            gens_idx_test.append(row_pairs)
+        assert gens_idx_test == gens_idx #TODO
+
+        gens = []
+        for i in range(len(gens_idx)):
+            gens.append([])
+            for global_start, length in gens_idx[i]:
+                record, local_start = self._locate_record_and_local_tick(global_start)
+                local_end = local_start + length - 1
+                gens[i].append(record.trajectory.get_world_trajectory(self.scene_size, local_start, local_end))
+
+        gens = [chain.from_iterable(gen) for gen in gens]
+        for _ in range(batch_length):
+            yield tuple(np.stack(t, 0) for t in zip(*[next(g) for g in gens]))
+
+
     def _prune_oldest_if_needed(self) -> None:
         if not self._records:
             return
@@ -197,3 +275,18 @@ class WorldBuffer:
             if record.start_tick <= global_tick <= record.latest_tick:
                 return record, global_tick - record.start_tick
         raise KeyError("tick pruned or out of range")
+
+def compute_vox_origin_batch_np(
+    player_xyz: np.ndarray,                  # shape (B, 3), float or int
+    scene_size: Tuple[float, float, float],
+    chunk_size: int = 16,
+) -> np.ndarray:
+    size_x, size_y, size_z = scene_size
+    min_chunk_x = (np.floor_divide(player_xyz[:, 0], chunk_size) * chunk_size) - (size_x // 2)
+    min_chunk_z = (np.floor_divide(player_xyz[:, 2], chunk_size) * chunk_size) - (size_z // 2)
+
+    half_y = size_y // 2
+    min_chunk_y = np.clip(np.floor(player_xyz[:, 1] - half_y), 0, None)
+
+    mins = np.stack([min_chunk_x, min_chunk_y, min_chunk_z], axis=-1)
+    return mins.astype(np.int32, copy=False)

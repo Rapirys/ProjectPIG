@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-
+from typing import Tuple
 
 #source: https://github.com/astra-vision/MonoScene/blob/master/monoscene/models/DDR.py
 """
@@ -131,6 +131,54 @@ class Process(nn.Module):
     def forward(self, x):
         return self.main(x)
 
+
+class Upsample(nn.Module):
+    def __init__(self, in_channels, out_channels, norm_layer, bn_momentum):
+        super(Upsample, self).__init__()
+        self.main = nn.Sequential(
+            nn.ConvTranspose3d(
+                in_channels,
+                out_channels,
+                kernel_size=3,
+                stride=2,
+                padding=1,
+                dilation=1,
+                output_padding=1,
+            ),
+            norm_layer(out_channels, momentum=bn_momentum),
+            nn.ReLU(),
+        )
+
+    def forward(self, x):
+        return self.main(x)
+
+
+class Downsample(nn.Module):
+    def __init__(self, feature, norm_layer, bn_momentum, expansion=8):
+        super(Downsample, self).__init__()
+        self.main = Bottleneck3D(
+            feature,
+            feature // 4,
+            bn_momentum=bn_momentum,
+            expansion=expansion,
+            stride=2,
+            downsample=nn.Sequential(
+                nn.AvgPool3d(kernel_size=2, stride=2),
+                nn.Conv3d(
+                    feature,
+                    int(feature * expansion / 4),
+                    kernel_size=1,
+                    stride=1,
+                    bias=False,
+                ),
+                norm_layer(int(feature * expansion / 4), momentum=bn_momentum),
+            ),
+            norm_layer=norm_layer,
+        )
+
+    def forward(self, x):
+        return self.main(x)
+
 class ASPP(nn.Module):
     """
     ASPP 3D
@@ -182,7 +230,6 @@ class CPMegaVoxels(nn.Module):
         super().__init__()
         self.size = size
         self.n_relations = n_relations
-        print("n_relations", self.n_relations)
         self.flatten_size = size[0] * size[1] * size[2]
         self.feature = feature
         self.context_feature = feature * 2
@@ -282,39 +329,130 @@ class FLoSP(nn.Module):
     # C - channels
     # B,C,X,Y,Z
 
-    def __init__(self, scene_size, dataset, project_scale):
+    def __init__(self, scene_size: Tuple[int, int, int], projection_scale: int):
         super().__init__()
         self.scene_size = scene_size
-        self.dataset = dataset
-        self.project_scale = project_scale
+        self.projection_scale = projection_scale
 
-    def forward(self, x2d, projected_pix, fov_mask):
-        c, h, w = x2d.shape
+    def forward(self, inputs: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> torch.Tensor:
+        x2d, projected_pix, fov_mask = inputs
+        B, C, H, W = x2d.shape
+        N = projected_pix.shape[1]
 
-        src = x2d.view(c, -1)
-        zeros_vec = torch.zeros(c, 1).type_as(src)
-        src = torch.cat([src, zeros_vec], 1)
+        src = x2d.view(B, C, H * W)                                    # (B, C, HW)
+        zero_col = torch.zeros(B, C, 1, dtype=src.dtype, device=src.device)
+        src_padded = torch.cat([src, zero_col], dim=2)                  # (B, C, HW+1)
 
-        pix_x, pix_y = projected_pix[:, 0], projected_pix[:, 1]
-        img_indices = pix_y * w + pix_x
-        img_indices[~fov_mask] = h * w
-        img_indices = img_indices.expand(c, -1).long()  # c, HWD
-        src_feature = torch.gather(src, 1, img_indices)
+        # Compute flattened image indices from (x,y); mask out-of-FOV to HW (the padded zero)
+        pix_x, pix_y = projected_pix[..., 0], projected_pix[..., 1]                                    # (B, N)
+        img_indices = pix_y * W + pix_x                                 # (B, N)
+        img_indices = img_indices.masked_fill(~fov_mask, H * W)         # (B, N)
+        img_indices = img_indices.long()
 
-        if self.dataset == "NYU":
-            x3d = src_feature.reshape(
-                c,
-                self.scene_size[0] // self.project_scale,
-                self.scene_size[2] // self.project_scale,
-                self.scene_size[1] // self.project_scale,
-            )
-            x3d = x3d.permute(0, 1, 3, 2)
-        elif self.dataset == "kitti":
-            x3d = src_feature.reshape(
-                c,
-                self.scene_size[0] // self.project_scale,
-                self.scene_size[1] // self.project_scale,
-                self.scene_size[2] // self.project_scale,
-            )
+        # Gather features: expand indices across channel dim
+        gather_idx = img_indices.unsqueeze(1).expand(B, C, N)           # (B, C, N)
+        gathered = torch.gather(src_padded, dim=2, index=gather_idx)    # (B, C, N)
 
+        # Reshape to (B, C, X, Y, Z)
+        X = self.scene_size[0] // self.projection_scale
+        Y = self.scene_size[1] // self.projection_scale
+        Z = self.scene_size[2] // self.projection_scale
+        assert X * Y * Z == N, f"N={N} must equal X*Y*Z={X*Y*Z} for the target scale."
+
+        x3d = gathered.view(B, C, X, Y, Z)
         return x3d
+
+
+class UNet3D(nn.Module):
+    def __init__(
+        self,
+        config,
+        norm_layer = nn.BatchNorm3d,
+        context_prior = True,
+        bn_momentum = 0.1,
+    ):
+        super().__init__()
+        projection_scale = config.minecraft.projection_scale
+        scene_size = config.minecraft.scene_size
+        feature = config.minecraft.prediction_head.feature_size
+        dilations = config.minecraft.prediction_head.dilations
+
+        size_l1 = (
+            int(scene_size[0] / projection_scale),
+            int(scene_size[1] / projection_scale),
+            int(scene_size[2] / projection_scale),
+        )
+        size_l2 = (size_l1[0] // 2, size_l1[1] // 2, size_l1[2] // 2)
+        size_l3 = (size_l2[0] // 2, size_l2[1] // 2, size_l2[2] // 2)
+
+        self.process_l1 = nn.Sequential(
+            Process(feature, norm_layer, bn_momentum, dilations),
+            Downsample(feature, norm_layer, bn_momentum),
+        )
+        self.process_l2 = nn.Sequential(
+            Process(feature * 2, norm_layer, bn_momentum, dilations),
+            Downsample(feature * 2, norm_layer, bn_momentum),
+        )
+
+        self.up_13_l2 = Upsample(feature * 4, feature * 2, norm_layer, bn_momentum)
+        self.up_12_l1 = Upsample(feature * 2, feature, norm_layer, bn_momentum)
+        # self.up_l1_lfull = Upsample(feature, feature // 2, norm_layer, bn_momentum)
+        self.up_l1_lfull = nn.Sequential(
+            nn.Conv3d(feature, feature // 2, kernel_size=1, stride=1, padding=0, bias=False),
+            norm_layer(feature // 2, momentum=bn_momentum),
+            nn.ReLU(),
+        )
+        self.out_conv = nn.Conv3d(feature // 2, feature // 2, kernel_size=1, padding=0, stride=1)
+
+        self.context_prior = context_prior
+        if context_prior:
+            self.CP_mega_voxels = CPMegaVoxels(feature * 4, size_l3, bn_momentum=bn_momentum)
+
+    def forward(self, x):
+        x3d_l1 = x
+        x3d_l2 = self.process_l1(x3d_l1)
+        x3d_l3 = self.process_l2(x3d_l2)
+
+        if self.context_prior:
+            x3d_l3 = self.CP_mega_voxels(x3d_l3)["x"]
+
+        x3d_up_l2 = self.up_13_l2(x3d_l3) + x3d_l2
+        x3d_up_l1 = self.up_12_l1(x3d_up_l2) + x3d_l1
+        x3d_up_lfull = self.up_l1_lfull(x3d_up_l1)
+
+        return self.out_conv(x3d_up_lfull)   # (B, out_channels, X, Y, Z)
+
+
+
+class SegmentationHead(nn.Module):
+
+    def __init__(self, config, classes):
+        super().__init__()
+        dilations = config.minecraft.prediction_head.dilations
+        c_in = config.minecraft.prediction_head.feature_size // 2
+
+        # ASPP Block
+        self.conv_list = dilations
+        self.conv1 = nn.ModuleList(
+            [nn.Conv3d(c_in, c_in, kernel_size=3, padding=d, dilation=d, bias=False)
+             for d in dilations]
+        )
+        self.bn1 = nn.ModuleList([nn.BatchNorm3d(c_in) for _ in dilations])
+
+        self.conv2 = nn.ModuleList(
+            [nn.Conv3d(c_in, c_in, kernel_size=3, padding=d, dilation=d, bias=False)
+             for d in dilations]
+        )
+        self.bn2 = nn.ModuleList([nn.BatchNorm3d(c_in) for _ in dilations])
+
+        self.relu = nn.ReLU()
+
+        out_ch = len(classes) #+ sum(classes)
+        self.conv_classes = nn.Conv3d(c_in, out_ch, kernel_size=3, padding=1, stride=1)
+
+    def forward(self, x):
+        y = self.bn2[0](self.conv2[0](self.relu(self.bn1[0](self.conv1[0](x)))))
+        for i in range(1, len(self.conv_list)):
+            y += self.bn2[i](self.conv2[i](self.relu(self.bn1[i](self.conv1[i](x)))))
+        x = self.relu(y + x)
+        return self.conv_classes(x)

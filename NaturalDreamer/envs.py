@@ -4,6 +4,7 @@ from pathlib import Path
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.wrappers import TransformAction
+from torch import nn
 
 import malmoenv
 import numpy as np
@@ -162,7 +163,7 @@ def make_env(config):
         eval_base = gym.make(environment_name, render_mode="rgb_array")
 
     if environment_name in {"Minecraft"}:
-        xml = Path("../Malmo/MalmoEnv/missions/mobchase_single_agent.xml").read_text() #findthegoal.xml
+        xml = Path("../Malmo/MalmoEnv/missions/findthegoal.xml").read_text() #findthegoal.xml
         base = malmoenv.make()
         base.init(
             xml,

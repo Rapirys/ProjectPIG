@@ -10,13 +10,15 @@ class ReplayBuffer(object):
         self.config = config
         self.device = device
         self.capacity = int(self.config.capacity)
+        self.scene_size = config
 
         self.observations        = np.empty((self.capacity, *observation_shape), dtype=np.float32)
         self.actions             = np.empty((self.capacity, actions_size), dtype=np.float32)
         self.rewards             = np.empty((self.capacity, 1), dtype=np.float32)
-        self.is_first          = np.empty((self.capacity, 1), dtype=np.float32)
+        self.is_first            = np.empty((self.capacity, 1), dtype=np.float32) #TODO Make is_first - boolean
         self.dones               = np.empty((self.capacity, 1), dtype=np.float32)
-        self.world_buffer = WorldBuffer(self.capacity)
+        self.world_buffer = WorldBuffer(self.capacity, config.minecraft.scene_size)
+        self.camera_position = np.empty((self.capacity, 5), dtype=np.float32) #
 
         self.bufferIndex = 0
         self.full = False
@@ -24,13 +26,14 @@ class ReplayBuffer(object):
     def __len__(self):
         return self.capacity if self.full else self.bufferIndex
 
-    def add(self, observation, world_state, action, reward, done, is_first):
+    def add(self, observation, world_state, camera_position, action, reward, done, is_first):
         self.observations[self.bufferIndex]     = observation
         self.actions[self.bufferIndex]          = action
         self.rewards[self.bufferIndex]          = reward
         self.dones[self.bufferIndex]            = done
         self.is_first[self.bufferIndex]         = is_first
-        self.world_buffer.append_update(world_state, is_first, done)
+        self.world_buffer.append_update(world_state, camera_position, is_first, done)
+        # self.camera_position[self.bufferIndex] = camera_position
 
         self.bufferIndex = (self.bufferIndex + 1) % self.capacity
         self.full = self.full or self.bufferIndex == 0
@@ -48,13 +51,17 @@ class ReplayBuffer(object):
         rewards  = torch.as_tensor(self.rewards[sampleIndex], device=self.device)
         dones    = torch.as_tensor(self.dones[sampleIndex], device=self.device)
         first    = torch.as_tensor(self.is_first[sampleIndex], device=self.device)
-        world_trajectories = self.world_buffer.get_trajectories(sampleIndex)
+        world_trajectories = self.world_buffer.get_trajectories(sampleIndex, self.is_first[sampleIndex].squeeze(-1).astype(bool))
+        # camera_position = self.camera_position[sampleIndex]
 
         return attridict({
                 "observations": observations,
                 "actions": actions,
                 "rewards": rewards,
                 "world_trajectories": world_trajectories,
+                # "camera_position": camera_position,
                 "dones": dones,
                 "is_first": first,
             })
+
+

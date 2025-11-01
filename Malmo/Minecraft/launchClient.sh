@@ -119,6 +119,7 @@ echo $MINERL_FORCE_BUILD
 
 if [ ! -e build/libs/MalmoMod-0.37.0-fat.jar ] || [ "$MINERL_FORCE_BUILD" == "1" ]; then
     echo "HELLO"
+    export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Dfml.coreMods.load=com.microsoft.Malmo.OverclockingPlugin"
     cmd="./gradlew runClient --stacktrace -Pjvm_debug_port=$jvm_debug_port -PrunDir=$runDir"
 else
 

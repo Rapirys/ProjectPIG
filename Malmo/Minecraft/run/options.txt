@@ -5,14 +5,14 @@ fov:1.0
 gamma:2.0
 saturation:0.0
 renderDistance:2
-guiScale:0
+guiScale:2
 particles:2
 bobView:false
 anaglyph3d:false
 maxFps:-1
 fboEnable:true
-difficulty:3
-fancyGraphics:false
+difficulty:2
+fancyGraphics:true
 ao:2
 renderClouds:true
 resourcePacks:[]

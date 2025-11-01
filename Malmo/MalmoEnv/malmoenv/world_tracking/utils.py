@@ -65,7 +65,6 @@ def _unpack_data_array(packed_words: np.ndarray, bits_per_entry: int) -> np.ndar
     if packed_words.dtype != np.uint64:
         raise ValueError("packed_words must be uint64")
 
-    #TODO verify correctness
     padded = np.concatenate([packed_words, np.zeros(1, dtype=np.uint64)])
 
     voxel_index = np.arange(4096, dtype=np.uint32)
@@ -81,30 +80,6 @@ def _unpack_data_array(packed_words: np.ndarray, bits_per_entry: int) -> np.ndar
 
     mask = (np.uint64(1) << np.uint64(bits_per_entry)) - np.uint64(1)
     return (base | add) & mask
-
-    # voxel_index = np.arange(4096, dtype=np.uint32)
-    # bits_per_entry_u32 = np.uint32(bits_per_entry)
-    #
-    # bit_index = voxel_index * bits_per_entry_u32  # starting bit for each entry
-    # word_index = (bit_index >> 6).astype(np.int64)  # which 64-bit word
-    # intra_word_offset = (bit_index & 63).astype(
-    #     np.uint64
-    # )  # bit offset within that word
-    #
-    # mask = (np.uint64(1) << np.uint64(bits_per_entry)) - np.uint64(1)
-    # values = (packed_words[word_index] >> intra_word_offset) & mask
-    #
-    # # Handle entries that span two 64-bit words.
-    # spill_bits = (intra_word_offset + bits_per_entry_u32 - 64).astype(np.int32)
-    # crosses_boundary = spill_bits > 0
-    # if np.any(crosses_boundary):
-    #     spill_u = spill_bits[crosses_boundary].astype(np.uint64)
-    #     next_low_bits = packed_words[word_index[crosses_boundary] + 1] & (
-    #         (np.uint64(1) << spill_u) - np.uint64(1)
-    #     )
-    #     values[crosses_boundary] |= next_low_bits << (bits_per_entry_u32 - spill_u)
-    #
-    # return values
 
 
 def _decode_section(section_bytes: memoryview) -> np.ndarray:
@@ -152,13 +127,12 @@ def _decode_section(section_bytes: memoryview) -> np.ndarray:
     # so bit shifts operate as expected on the host.
     packed_words = (
         np.frombuffer(buf[offset : offset + bytes_in_words], dtype=">u8")
-        .byteswap()
         .astype(np.uint64, copy=False)
     )
     offset += bytes_in_words
 
     # ---- Consume (and ignore) optional trailing non-air count ----
-    if offset < len(buf):  # TODO likly not needed
+    if offset < len(buf):  # TODO likely not needed
         try:
             _, offset = _read_varint(buf, offset)
         except ValueError:

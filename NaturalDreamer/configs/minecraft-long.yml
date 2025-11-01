@@ -10,12 +10,12 @@ checkpointInterval: 500
 resume: False #True
 checkpointToLoad: 3k
 #
-episodesBeforeStart: 10
+episodesBeforeStart: 1
 numInteractionEpisodes: 1
 numEvaluationEpisodes: 1
 
 dreamer:
-  batchSize: 32
+  batchSize: 3
   batchLength: 64
   imaginationHorizon: 15
 
@@ -40,6 +40,8 @@ dreamer:
 
   buffer:
     capacity: 50000
+    minecraft:
+      scene_size: [20, 14, 20]
 
   encoder:
     depth: 16
@@ -91,9 +93,10 @@ dreamer:
 
   minecraft:
     fov: 90
-    full_scene_size: 256, 256, 32
+    scene_size: [20, 14, 20]
+    projection_scale: 1
     prediction_head:
-      dilations: 1, 2, 3
+      dilations: [1, 2, 3]
       feature_size: 128
 
 
