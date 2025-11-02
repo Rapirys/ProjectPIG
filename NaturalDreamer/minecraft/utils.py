@@ -58,25 +58,27 @@ def vox2pix(
 
     # 2) Camera → Pixel (pinhole projection)
     camera_xyz = points_camera_h[..., :3]
+    cam_z = camera_xyz[..., 2]
+    z_eps = 1e-6
+    vis_geom = cam_z > z_eps
     pixel_h = camera_xyz @ cam_K.transpose(1, 2)  # (B,N,3) = [u_h, v_h, w_h]
     w = pixel_h[..., 2].clamp_min_(1e-8)  # (B,N)
-    pixel_u = pixel_h[..., 0] / w  # (B,N)
-    pixel_v = pixel_h[..., 1] / w  # (B,N)
+    pixel_u = torch.where(vis_geom, pixel_h[..., 0] / w, torch.zeros_like(w))
+    pixel_v = torch.where(vis_geom, pixel_h[..., 1] / w, torch.zeros_like(w))
 
     # 3) Discrete pixels, FOV mask, and depth output
     pixel_u_rounded = torch.round(pixel_u)
     pixel_v_rounded = torch.round(pixel_v)
 
-    cam_z = camera_xyz[..., 2]
     visible_mask = (
         (pixel_u_rounded >= 0) & (pixel_u_rounded < img_W) &
         (pixel_v_rounded >= 0) & (pixel_v_rounded < img_H) &
-        (cam_z > 0.0)
+        vis_geom
     )    # (B, N) bool
-
-    projected_pix = torch.stack([pixel_u_rounded, pixel_v_rounded], dim=-1).to(torch.long)  # (B, N, 2)
-
-    return projected_pix, visible_mask, cam_z, vol_dim
+    # Flatten indices; send non-visible to HW (padded zero column)
+    img_indices = (pixel_v_rounded * img_W + pixel_u_rounded).to(torch.long)
+    img_indices = torch.where(visible_mask, img_indices, torch.full_like(img_indices, img_H * img_W))
+    return img_indices, cam_z, vol_dim
 
 def intrinsics_from_fov(W: int, H: int, hfov_deg: float, vfov_deg: float,
                         device=None, dtype=torch.float32) -> torch.Tensor:

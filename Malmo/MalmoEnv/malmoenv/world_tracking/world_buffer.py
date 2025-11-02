@@ -30,7 +30,7 @@ class WorldTrajectory:
         self.tick_views: List[List[int]] = []
         self.current_view: Dict[Tuple[int, int], int] = {}
         self.age = -1
-        self.camera_positions: List[np.ndarray] = [] #Shape (len, 5): #X, Y,Z , yaw, pitch
+        self.camera_positions: List[np.ndarray] = [] #Shape (len, 5): #X,Y,Z , yaw, pitch
 
 
     def add_update(self, world_update: WorldUpdate, camera_position: np.ndarray) -> None:
@@ -87,7 +87,7 @@ class WorldTrajectory:
         for i, view in enumerate(chunk_view_iterator):
             ox, oy, oz = origins[i]
             ex, ey, ez = ox + sx, oy + sy, oz + sz
-            vol = np.zeros((sy, sx, sz), dtype=np.uint16)
+            vol = np.zeros((sx, sy, sz), dtype=np.uint16)
 
             chunk_size = 16
             for (ccx, ccz), chunk_arr in view.items():
@@ -103,15 +103,14 @@ class WorldTrajectory:
 
                 # region indices
                 rx0, rx1 = x0 - ox, x1 - ox
-                rz0, rz1 = z0 - oz, z1 - oz
                 ry0, ry1 = y0 - oy, y1 - oy
+                rz0, rz1 = z0 - oz, z1 - oz
 
                 # chunk indices (chunk_arr is [Y, X, Z] with X,Z local to chunk)
                 lx0, lx1 = x0 - base_x, x1 - base_x
-                lz0, lz1 = z0 - base_z, z1 - base_z
                 ly0, ly1 = y0, y1
-                #TODO look like x and z axes are swaped and the x is reversed
-                vol[ry0:ry1, rz0:rz1, rx0:rx1] = chunk_arr[ly0:ly1, lz0:lz1, lx0:lx1]
+                lz0, lz1 = z0 - base_z, z1 - base_z
+                vol[rx0:rx1, ry0:ry1, rz0:rz1] = chunk_arr[lx0:lx1, ly0:ly1, lz0:lz1]
 
             yield camera_positions_np[i], origins[i], vol
 
@@ -148,14 +147,14 @@ class WorldTrajectory:
 
     def get_chunk_trajectory(self, chunk: ActiveChunk, start_tick: int = None) -> Tuple[np.ndarray, Iterator[np.ndarray]]:
         #TODO Tream chunk hight early
-        chunk_arr = np.zeros((256, 16, 16), dtype=np.uint16)
+        chunk_arr = np.zeros((16, 256, 16), dtype=np.uint16)
         start_tick = chunk.loaded_on_tick if start_tick is None else start_tick
 
         for section in chunk.sections:
             sy = int(section.sy) & 0x0F  # 0..15
             sec_arr = section.as_numpy_array()
             y0 = sy * 16
-            chunk_arr[y0 : y0 + 16, :, :] = sec_arr
+            chunk_arr[:, y0:y0 + 16, :] = sec_arr
 
         def _iter() -> Iterator[np.ndarray]:
 
@@ -163,7 +162,7 @@ class WorldTrajectory:
             for idx in range(chunk.loaded_on_tick, end + 1):
                 updates = [chunk.updates[i] for i in chunk.tick_lookup.get(idx, [])]
                 for utick, x, y, z, state in updates:
-                    chunk_arr[int(y), int(x) & 15, int(z) & 15] = np.uint16(state & 0xFFFF)
+                    chunk_arr[int(x) & 15, int(y), int(z) & 15] = np.uint16(state & 0xFFFF)
                 if idx >= start_tick:
                     yield chunk_arr
 
@@ -227,26 +226,12 @@ class WorldBuffer:
         batch_size, batch_length = sample_index.shape
         gens_idx = []
         for i in range(batch_size):
-            gens_idx.append([])
-            start = int(sample_index[i, 0])
-            l = 1
-            for j in range(1, batch_length):
-                if start_mask[i, j]:
-                    gens_idx[i].append((start, l))
-                    start = int(sample_index[i, j])
-                    l = 0
-                l += 1
-            gens_idx[i].append((start, l))
-
-        gens_idx_test = []
-        for i in range(batch_size):
             starts_cols = np.flatnonzero(start_mask[i])
             if starts_cols.size == 0 or starts_cols[0] != 0:
                 starts_cols = np.r_[0, starts_cols]
             lengths = np.diff(np.r_[starts_cols, batch_length])
             row_pairs = [(int(sample_index[i, c]), int(l)) for c, l in zip(starts_cols, lengths)]
-            gens_idx_test.append(row_pairs)
-        assert gens_idx_test == gens_idx #TODO
+            gens_idx.append(row_pairs)
 
         gens = []
         for i in range(len(gens_idx)):

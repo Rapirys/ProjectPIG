@@ -38,7 +38,7 @@ class MinecraftSegmentationHead(nn.Module):
 
        # 2d features
         self.decoder2d = DecoderConv(
-            input_size, [config.minecraft.prediction_head.feature_size,self.img_W, self.img_H], config.decoder #TODO feature_size is under questions, especially if we increase the resolution
+            input_size, [config.minecraft.prediction_head.feature_size, self.img_H, self.img_W], config.decoder #TODO feature_size is under questions, especially if we increase the resolution
         ).to(self.device)
         self.flosp = FLoSP(self.scene_size, self.projection_scale).to(self.device)
         self.net_3d_decoder = UNet3D(config).to(self.device)
@@ -54,9 +54,9 @@ class MinecraftSegmentationHead(nn.Module):
     def forward(self, x, camera_position, grid_origin):
         cam_E = extrinsics_from_player_position(camera_position)
         cam_E = torch.from_numpy(cam_E).to(self.device)
-        projected_pix, fov_mask, _, _ = vox2pix(cam_E, self.cam_K, grid_origin, self.img_W, self.img_H, self.scene_size)
+        projected_pix, _, _ = vox2pix(cam_E, self.cam_K, grid_origin, self.img_W, self.img_H, self.scene_size)
         x = self.decoder2d(x)
-        return self.network((x, projected_pix, fov_mask))
+        return self.network((x, projected_pix))
 
 def get_classes(block_state_registry):
     blocks =block_state_registry["blocks"]

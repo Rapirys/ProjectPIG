@@ -51,10 +51,19 @@ class Dreamer:
         self.buffer         = ReplayBuffer(observationShape, self.actionSize, config.buffer, device)
         self.valueMoments   = Moments(device)
 
+
+        self.block_state_registry = None
+        self.block_state_registry_lut = None
+        self.classes = config.minecraft.classes
+        self.minecraftSegmentationHead = MinecraftSegmentationHead(self.config, self.device, self.fullStateSize,
+                                                                   self.observationShape, self.classes)
+
         self.worldModelParameters = (list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.recurrentModel.parameters()) +
-                                     list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()))
-        if self.config.useContinuationPrediction:
-            self.worldModelParameters += list(self.continuePredictor.parameters())
+                                     list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()) +
+                                     list(self.minecraftSegmentationHead.parameters()))
+
+        # if self.config.useContinuationPrediction:
+        #     self.worldModelParameters += list(self.continuePredictor.parameters())
 
         self.worldModelOptimizer    = torch.optim.Adam(self.worldModelParameters,   lr=self.config.worldModelLR)
         self.actorOptimizer         = torch.optim.Adam(self.actor.parameters(),     lr=self.config.actorLR)
@@ -64,9 +73,6 @@ class Dreamer:
         self.totalEnvSteps      = 0
         self.totalGradientSteps = 0
 
-        self.block_state_registry = None
-        self.block_state_registry_lut = None
-        self.minecraftSegmentationHead = None
 
     def _flat_action(self, a: dict):
         # TODO Review if there a better place
@@ -104,11 +110,6 @@ class Dreamer:
             camera_position, grid_origin, grid = next(data.world_trajectories)
             grid_origin = torch.from_numpy(grid_origin).to(self.device)
             grid = torch.from_numpy(grid).to(self.device)  # torch.Size([1, 20, 20, 20])
-            #TODO delerr
-            # target[1][5].to(device='cpu').numpy()
-            # grid_origin[1].to(device='cpu').numpy() [-10, 49, -10]
-            # camera_position[1] [0.9146066904067993, 56.619998931884766, 0.7888732552528381, 234.0, 0.0]
-            # gold at 2 56 12
             block_id_grid = self.block_state_registry_lut[grid.long()] #TODO Do not need this maping in final version
             full_state_step = torch.cat((recurrentState, posterior), dim=-1)
             reconstruction3DLatent = self.minecraftSegmentationHead(full_state_step, camera_position, grid_origin)
@@ -117,7 +118,8 @@ class Dreamer:
             num_classes = reconstruction3DLatent.shape[1]
             class_weight = torch.ones(num_classes, device=self.device)
             #TODO may be croped on top
-            reconstruction3DLoss = CE_ssc_loss(reconstruction3DLatent[:, :, :H, :, :], block_id_grid.long(), class_weight)
+            #TODO only last itteration is effected. Add += or move all gradient computations to loop
+            reconstruction3DLoss = CE_ssc_loss(reconstruction3DLatent[:, :, :H, :, :], block_id_grid.long(), class_weight) #TODO how to avarage CE_ssc_loss?
 
         recurrentStates             = torch.stack(recurrentStates,              dim=1) # (batchSize, batchLength-1, recurrentSize)
         priorsLogits                = torch.stack(priorsLogits,                 dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
@@ -227,11 +229,12 @@ class Dreamer:
 
             observation, info = env.reset(seed= (seed + self.totalEpisodes if seed else None))
 
+            registry = info["BlockStateRegistry"]
+            if not self.block_state_registry:
+                assert len(get_classes(registry)) == self.classes
+                self.block_state_registry = registry
+                self.block_state_registry_lut = build_globalid_to_blockid_lut(self.block_state_registry, self.device)
 
-            self.block_state_registry = info["BlockStateRegistry"]
-            self.block_state_registry_lut = build_globalid_to_blockid_lut(self.block_state_registry, self.device)
-            self.minecraftSegmentationHead = MinecraftSegmentationHead(self.config, self.device, self.fullStateSize,
-                                                                       self.observationShape, get_classes(self.block_state_registry))
 
             world_state = decode_world_update(info["world_observation"])
             camera_position = extract_camera_position_from_info(info)

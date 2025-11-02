@@ -14,8 +14,9 @@ episodesBeforeStart: 1
 numInteractionEpisodes: 1
 numEvaluationEpisodes: 1
 
+
 dreamer:
-  batchSize: 3
+  batchSize: 2
   batchLength: 64
   imaginationHorizon: 15
 
@@ -23,6 +24,8 @@ dreamer:
   latentLength: 16 #32
   latentClasses: 16 #64
   encodedObsSize: 1024
+  resolution: [368, 640]
+#  resolution: [ 64, 96 ]
 
   useContinuationPrediction: False
   actorLR: 0.00004
@@ -39,9 +42,9 @@ dreamer:
   entropyScale: 0.0003
 
   buffer:
-    capacity: 50000
+    capacity: 5000 #TODO Bigger buffer in real training
     minecraft:
-      scene_size: [20, 14, 20]
+      scene_size: [20, 16, 20]
 
   encoder:
     depth: 16
@@ -52,7 +55,7 @@ dreamer:
   decoder:
     depth: 16
     stride: 2
-    kernelSize: 5
+    kernelSize: 4
     activation: Tanh
 
   recurrentModel:
@@ -93,7 +96,8 @@ dreamer:
 
   minecraft:
     fov: 90
-    scene_size: [20, 14, 20]
+    classes: 236
+    scene_size: [20, 16, 20]
     projection_scale: 1
     prediction_head:
       dilations: [1, 2, 3]

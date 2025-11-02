@@ -109,14 +109,20 @@ class DecoderConv(nn.Module):
         self.channels, self.height, self.width = outputShape
         activation = getattr(nn, self.config.activation)()
 
+        h4 = self.height // (self.config.stride ** 4)
+        w4 = self.width  // (self.config.stride ** 4)
+        start_ch = self.config.depth * 8
+        kernel = self.config.kernelSize
+        size = self.config.stride
+
         self.network = nn.Sequential(
-            nn.Linear(inputSize, self.config.depth*32),
-            nn.Unflatten(1, (self.config.depth*32, 1)),
-            nn.Unflatten(2, (1, 1)),
-            nn.ConvTranspose2d(self.config.depth*32, self.config.depth*4, self.config.kernelSize,     self.config.stride),    activation,
-            nn.ConvTranspose2d(self.config.depth*4,  self.config.depth*2, self.config.kernelSize,     self.config.stride),    activation,
-            nn.ConvTranspose2d(self.config.depth*2,  self.config.depth*1, self.config.kernelSize + 1, self.config.stride),    activation,
-            nn.ConvTranspose2d(self.config.depth*1,  self.channels,       self.config.kernelSize + 1, self.config.stride))
+            nn.Linear(inputSize, start_ch * h4 * w4),
+            nn.Unflatten(1, (start_ch, h4, w4)),
+            nn.ConvTranspose2d(start_ch, self.config.depth*4, kernel, size, padding=1), activation,
+            nn.ConvTranspose2d(self.config.depth*4,  self.config.depth*2, kernel, size, padding=1), activation,
+            nn.ConvTranspose2d(self.config.depth*2,  self.config.depth*1, kernel, size, padding=1), activation,
+            nn.ConvTranspose2d(self.config.depth*1,  self.channels, kernel, size, padding=1),
+        )
 
     def forward(self, x):
         return self.network(x)

@@ -10,7 +10,7 @@ import malmoenv
 import numpy as np
 
 def getEnvProperties(env):
-    assert env.observation_space.shape == (3, 64, 64), "The observation space is incorrect"
+    assert env.observation_space.shape[0] == 3, "The observation space is incorrect"
     assert isinstance(env.action_space, gym.spaces.Box), "Expected flat Box action space"
     observationShape = env.observation_space.shape
 
@@ -157,6 +157,7 @@ class MalmoAdapter(gym.Env):
 # --- factory ---
 def make_env(config):
     environment_name = config.environmentName
+    resolution = tuple(config.dreamer.resolution)
 
     if environment_name == "CarRacing-v3":
         base = gym.make(environment_name)
@@ -185,6 +186,6 @@ def make_env(config):
         eval_base = base
 
     # TODO Different resize for minecraft
-    env = CleanGymWrapper(GymPixelsProcessingWrapper(gym.wrappers.ResizeObservation(base, (64, 64))))
-    env_eval = CleanGymWrapper(GymPixelsProcessingWrapper(gym.wrappers.ResizeObservation(eval_base, (64, 64))))
+    env = CleanGymWrapper(GymPixelsProcessingWrapper(gym.wrappers.ResizeObservation(base, resolution)))
+    env_eval = CleanGymWrapper(GymPixelsProcessingWrapper(gym.wrappers.ResizeObservation(eval_base, resolution)))
     return env, env_eval

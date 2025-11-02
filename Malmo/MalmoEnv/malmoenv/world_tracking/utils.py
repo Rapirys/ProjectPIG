@@ -12,7 +12,7 @@ class SectionBlob:
     data: memoryview
 
     def as_numpy_array(self) -> np.ndarray:
-       return _decode_section(self.data)
+        return _decode_section(self.data)
 
 
 @dataclass(frozen=True)
@@ -155,7 +155,7 @@ def _decode_section(section_bytes: memoryview) -> np.ndarray:
         result = values.astype(np.uint16, copy=False)
 
     # Reshape to [y, z, x]
-    return result.reshape(16, 16, 16)
+    return result.reshape(16, 16, 16).transpose((2, 0, 1))
 
 
 
