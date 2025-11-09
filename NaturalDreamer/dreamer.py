@@ -5,10 +5,10 @@ from torch.distributions import kl_divergence, Independent, OneHotCategoricalStr
 import numpy as np
 import os
 
-from NaturalDreamer.utils import symlog
-from NaturalDreamer.minecraft.loss import CE_ssc_loss
-from NaturalDreamer.minecraft.minecraft import MinecraftSegmentationHead, get_classes
-from NaturalDreamer.minecraft.utils import (
+from utils import symlog
+from minecraft.loss import CE_ssc_loss
+from minecraft.minecraft import MinecraftSegmentationHead, get_classes
+from minecraft.utils import (
     extract_camera_position_from_info,
     build_globalid_to_blockid_lut,
 )
@@ -144,11 +144,9 @@ class Dreamer:
         # reconstructionDistribution =  Independent(Normal(reconstructionMeans, 1), len(self.observationShape))
         # reconstructionLoss         = -reconstructionDistribution.log_prob(data.observations[:, 1:]).mean()
 
-        reconstructionMeans_raw = self.decoder(fullStates.view(-1, self.fullStateSize)).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
-        reconstructionMeans_symlog = symlog(reconstructionMeans_raw)
-        target_symlog = symlog(data.observations[:, 1:])
-        reconstructionDistribution = Normal(reconstructionMeans_symlog, 1.0)
-        reconstructionLoss = -reconstructionDistribution.log_prob(target_symlog).mean()
+        reconstructionMeans = self.decoder(fullStates.view(-1, self.fullStateSize)).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
+        reconstructionMeans = symlog(reconstructionMeans)
+        reconstructionLoss = -Normal(reconstructionMeans, 1.0).log_prob(symlog(data.observations[:, 1:])).mean()
 
         rewardDistribution  =  self.rewardPredictor(fullStates)
         rewardLoss          = -rewardDistribution.log_prob(data.rewards[:, 1:].squeeze(-1)).mean()
