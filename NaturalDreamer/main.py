@@ -46,24 +46,11 @@ def run(configFile):
         pbar = tqdm(total=steps_taken, desc=f"Training for run: {iteration}", unit="step", leave=False)
 
         for step_idx in range(steps_taken):
-            t0 = _now_sync()
             sampledData = dreamer.buffer.sample(dreamer.config.batchSize, dreamer.config.batchLength)
-            t1 = _now_sync()
-
             initialStates, worldModelMetrics = dreamer.worldModelTraining(sampledData)
-            t2 = _now_sync()
-
             behaviorMetrics = dreamer.behaviorTraining(initialStates)
-            t3 = _now_sync()
-
-            # durations
-            dt_sample = t1 - t0
-            dt_wm     = t2 - t1
-            dt_beh    = t3 - t2
-            dt_step   = t3 - t0
 
             # show timings on the bar
-            pbar.set_postfix(sample=f"{dt_sample:.2f}s", wm=f"{dt_wm:.2f}s", beh=f"{dt_beh:.2f}s", step=f"{dt_step:.2f}s")
             dreamer.totalGradientSteps += 1
             pbar.update(1)
 
