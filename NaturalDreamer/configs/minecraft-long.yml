@@ -19,7 +19,7 @@ dreamer:
   actionRepeat: 3
   batchSize: 3
   batchLength: 32
-  imaginationHorizon: 64
+  imaginationHorizon: 196
 
   recurrentSize: 512 #1024*8
   latentLength: 16 #32
@@ -51,49 +51,49 @@ dreamer:
     depth: 16
     stride: 2
     kernelSize: 4
-    activation: Tanh #TODO activation = RElU
+    activation: ReLU #TODO activation = RElU
 
   decoder:
     depth: 16
     stride: 2
     kernelSize: 4
-    activation: Tanh
+    activation: ReLU
 
   recurrentModel:
     hiddenSize: 200
-    activation: Tanh
+    activation: ReLU
 
   priorNet:
     hiddenSize: 200
     numLayers: 2
-    activation: Tanh
+    activation: ReLU
     uniformMix: 0.01
 
   posteriorNet:
     hiddenSize: 200
     numLayers: 2
-    activation: Tanh
+    activation: ReLU
     uniformMix: 0.01
 
   reward:
     hiddenSize: 400
     numLayers: 2
-    activation: Tanh
+    activation: ReLU
 
   continuation:
     hiddenSize: 400
     numLayers: 3
-    activation: Tanh
+    activation: ReLU
 
   actor:
     hiddenSize: 400
     numLayers: 2
-    activation: Tanh
+    activation: ReLU
 
   critic:
     hiddenSize: 400
     numLayers: 3
-    activation: Tanh
+    activation: ReLU
 
   minecraft:
     fov: 90
