@@ -52,11 +52,11 @@ class MinecraftSegmentationHead(nn.Module):
         )
 
     def forward(self, x, camera_position, grid_origin):
-        cam_E = extrinsics_from_player_position(camera_position)
-        cam_E = torch.from_numpy(cam_E).to(self.device)
-        projected_pix, _, _ = vox2pix(cam_E, self.cam_K, grid_origin, self.img_W, self.img_H, self.scene_size)
+        cam_E = extrinsics_from_player_position(camera_position, device=self.device)
+        projected_pix, fov_mask, _, _ = vox2pix(cam_E, self.cam_K, grid_origin, self.img_W, self.img_H, self.scene_size)
         x = self.decoder2d(x)
-        return self.network((x, projected_pix))
+        out = self.network((x, projected_pix, fov_mask))
+        return out, fov_mask
 
 def get_classes(block_state_registry):
     blocks =block_state_registry["blocks"]

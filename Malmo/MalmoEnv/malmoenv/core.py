@@ -222,9 +222,11 @@ class Env:
         comms.send_message(sock, ("<MalmoEnv" + malmo_version + "/>").encode())
 
 
-    i=1
-    def reset(self):
+    def reset(self, seed=None):
         """gym api reset"""
+
+        if seed is not None:
+            self.set_episode_seed(seed)
 
         if self.resync_period > 0 and (self.resets + 1) % self.resync_period == 0:
             self.exit_resync()
@@ -234,7 +236,6 @@ class Env:
             if not self.done:
                 time.sleep(0.1)
 
-        i=self.i+1
         return self._start_up()
 
     @retry

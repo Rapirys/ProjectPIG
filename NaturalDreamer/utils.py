@@ -10,6 +10,14 @@ import gymnasium as gym
 import csv
 import pandas as pd
 import plotly.graph_objects as pgo
+import time
+
+from malmoenv.world_tracking.utils import (
+    WorldUpdate,
+    ChunkLoad,
+    ChunkUnload,
+    SectionBlob,
+)
 
 
 def seedEverything(seed):
@@ -174,3 +182,78 @@ class Moments(nn.Module):
         self.high = self._decay*self.high + (1 - self._decay)*high
         inverseScale = torch.max(self._min, self.high - self.low)
         return self.low.detach(), inverseScale.detach()
+
+def symlog(x):
+    # sign(x) * log(1 + |x|)
+    return torch.sign(x) * torch.log1p(torch.abs(x))
+
+
+def _now_sync():
+    """Wall-clock time with a CUDA sync so GPU kernels are accounted for."""
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return time.perf_counter()
+
+
+import numpy as np
+
+def collapse_world_updates(updates: list[WorldUpdate]) -> WorldUpdate:
+    #TODO horrible and aggly function
+    """
+    Collapse several consecutive WorldUpdate objects into one:
+      • Chunks: keep only the final event per (cx, cz) in the window.
+        - If final event is load  -> emit ChunkLoad with its latest sections.
+        - If final event is unload-> emit ChunkUnload.
+      • Blocks: last-write-wins by (x, y, z).
+    """
+    if not updates:
+        return WorldUpdate([], [], None)
+
+    last_chunk_event: dict[tuple[int, int], tuple[str, list[SectionBlob] | None]] = {}
+    for upd in updates:
+        for ev in upd.chunk_unloads:
+            last_chunk_event[(ev.cx, ev.cz)] = ("unload", None)
+        for ev in upd.chunk_loads:
+            last_chunk_event[(ev.cx, ev.cz)] = ("load", ev.sections)
+
+    chunk_loads = [
+        ChunkLoad(cx=cx, cz=cz, sections=sections)
+        for (cx, cz), (kind, sections) in last_chunk_event.items()
+        if kind == "load"
+    ]
+    chunk_unloads = [
+        ChunkUnload(cx, cz)
+        for (cx, cz), (kind, _) in last_chunk_event.items()
+        if kind == "unload"
+    ]
+
+    # ---- Collapse block updates (last write wins) ----
+    arrs = [u.block_updates for u in updates if (u.block_updates is not None and u.block_updates.size > 0)]
+    dtype = np.dtype([("x", "<i4"), ("y", "<i4"), ("z", "<i4"), ("state", "<u2")])
+    blocks = np.concatenate(arrs, axis=0) if arrs else np.empty(0, dtype=dtype)
+
+    # final-unloaded chunk coordinates as a structured array
+    unloaded_pairs = np.array(
+        [(cx, cz) for (cx, cz), (kind, _) in last_chunk_event.items() if kind == "unload"],
+        dtype=[("cx", "<i4"), ("cz", "<i4")],
+    )
+
+    # vectorized mask: keep blocks whose (cx,cz) is NOT in finally-unloaded set
+    pairs = np.empty(blocks.shape[0], dtype=unloaded_pairs.dtype)
+    pairs["cx"] = (blocks["x"] >> 4).astype(np.int32)
+    pairs["cz"] = (blocks["z"] >> 4).astype(np.int32)
+    keep = ~np.isin(pairs, unloaded_pairs)  # works even if unloaded_pairs is empty
+    blocks = blocks[keep]
+
+    # last-write-wins per (x,y,z): reverse, unique on keys, map indices back
+    rev_blocks = blocks[::-1]
+    rev_keys = rev_blocks[["x", "y", "z"]]
+    _, first_idx_rev = np.unique(rev_keys, return_index=True)
+    sel = (rev_blocks.shape[0] - 1) - first_idx_rev
+    sel.sort()
+    block_updates = blocks[sel]
+
+    if block_updates.size == 0:
+        block_updates = None
+
+    return WorldUpdate(chunk_loads=chunk_loads, chunk_unloads=chunk_unloads, block_updates=block_updates)

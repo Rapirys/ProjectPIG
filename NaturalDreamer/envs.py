@@ -147,7 +147,7 @@ class MalmoAdapter(gym.Env):
         self.action_space = malmo_env.action_space
         self.observation_space = malmo_env.observation_space
 
-    def reset(self, *, seed=None, options=None): return self.env.reset()  # Gymnasium requires (obs, info)
+    def reset(self, *, seed=None, options=None): return self.env.reset(seed=seed)  # Gymnasium requires (obs, info)
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
         return obs, reward, bool(done), False, info #The info is likely to be json string, not dict

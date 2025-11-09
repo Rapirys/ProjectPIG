@@ -58,27 +58,25 @@ def vox2pix(
 
     # 2) Camera → Pixel (pinhole projection)
     camera_xyz = points_camera_h[..., :3]
-    cam_z = camera_xyz[..., 2]
-    z_eps = 1e-6
-    vis_geom = cam_z > z_eps
     pixel_h = camera_xyz @ cam_K.transpose(1, 2)  # (B,N,3) = [u_h, v_h, w_h]
     w = pixel_h[..., 2].clamp_min_(1e-8)  # (B,N)
-    pixel_u = torch.where(vis_geom, pixel_h[..., 0] / w, torch.zeros_like(w))
-    pixel_v = torch.where(vis_geom, pixel_h[..., 1] / w, torch.zeros_like(w))
+    pixel_u = pixel_h[..., 0] / w  # (B,N)
+    pixel_v = pixel_h[..., 1] / w  # (B,N)
 
     # 3) Discrete pixels, FOV mask, and depth output
     pixel_u_rounded = torch.round(pixel_u)
     pixel_v_rounded = torch.round(pixel_v)
 
+    cam_z = camera_xyz[..., 2]
     visible_mask = (
         (pixel_u_rounded >= 0) & (pixel_u_rounded < img_W) &
         (pixel_v_rounded >= 0) & (pixel_v_rounded < img_H) &
-        vis_geom
-    )    # (B, N) bool
-    # Flatten indices; send non-visible to HW (padded zero column)
-    img_indices = (pixel_v_rounded * img_W + pixel_u_rounded).to(torch.long)
-    img_indices = torch.where(visible_mask, img_indices, torch.full_like(img_indices, img_H * img_W))
-    return img_indices, cam_z, vol_dim
+        (cam_z > 1e-6)
+    )
+
+    projected_pix = torch.stack([pixel_u_rounded, pixel_v_rounded], dim=-1).to(torch.long)  # (B, N, 2)
+
+    return projected_pix, visible_mask, cam_z, vol_dim
 
 def intrinsics_from_fov(W: int, H: int, hfov_deg: float, vfov_deg: float,
                         device=None, dtype=torch.float32) -> torch.Tensor:
@@ -96,41 +94,51 @@ def intrinsics_from_fov(W: int, H: int, hfov_deg: float, vfov_deg: float,
     return K
 
 
-def extrinsics_from_player_position(pose: np.ndarray) -> np.ndarray:
+def extrinsics_from_player_position(pose: torch.Tensor, device = None) -> torch.Tensor:
     """
-    pose: (B,5) -> [x, y, z, yaw_deg, pitch_deg]
-    World: X east-west, Y up, Z south-north; camera +Z forward.
-    yaw_deg: clockwise from south; pitch_deg: down positive.
-    Returns: cam_E (B,4,4) world→camera.
+    pose: [B,5] or [5] = [x, y, z, yaw_deg(clockwise from south), pitch_deg(down+)]
+    Returns: cam_E [B,4,4] world→camera. Mirrors the NumPy reference op-by-op.
     """
-    #TODO rewrite with PyTorch3D or scypy
-    P = np.asarray(pose, dtype=np.float32)
-    if P.ndim == 1: P = P[None, :]                      # (1,5) if single
-    X, Y, Z, yaw_deg, pitch_deg = P.T
+    # force identical dtype/op order as NumPy reference
+    if pose.ndim == 1:
+        pose = pose[None, :]
+    P = pose.to(dtype=torch.float32, device=device)             # NumPy path uses float32
+    x, y, z, yaw_deg, pitch_deg = P.T
 
     # angles
-    yaw   = np.deg2rad(-yaw_deg)                        # invert -> CCW+
-    pitch = np.deg2rad(pitch_deg)
-    cy, sy = np.cos(yaw),   np.sin(yaw)
-    cp, sp = np.cos(pitch), np.sin(pitch)
+    yaw   = torch.deg2rad(-yaw_deg)              # invert -> CCW+
+    pitch = torch.deg2rad(pitch_deg)
+
+    cy, sy = torch.cos(yaw),   torch.sin(yaw)
+    cp, sp = torch.cos(pitch), torch.sin(pitch)
 
     B = P.shape[0]
-    Ry = np.zeros((B,3,3), dtype=np.float32)
-    Ry[:,0,0], Ry[:,0,2], Ry[:,1,1], Ry[:,2,0], Ry[:,2,2] = cy, sy, 1.0, -sy, cy
+    Ry = torch.zeros((B, 3, 3), dtype=torch.float32, device=P.device)
+    Ry[:, 0, 0] = cy
+    Ry[:, 0, 2] = sy
+    Ry[:, 1, 1] = 1.0
+    Ry[:, 2, 0] = -sy
+    Ry[:, 2, 2] = cy
 
-    Rx = np.zeros((B,3,3), dtype=np.float32)
-    Rx[:,0,0], Rx[:,1,1], Rx[:,1,2], Rx[:,2,1], Rx[:,2,2] = 1.0, cp, -sp, sp, cp
+    Rx = torch.zeros((B, 3, 3), dtype=torch.float32, device=P.device)
+    Rx[:, 0, 0] = 1.0
+    Rx[:, 1, 1] = cp
+    Rx[:, 1, 2] = -sp
+    Rx[:, 2, 1] = sp
+    Rx[:, 2, 2] = cp
 
-    Rcw = np.einsum('bij,bjk->bik', Ry, Rx)             # camera→world
-    Rwc = np.transpose(Rcw, (0,2,1))                    # world→camera (inverse)
+    # match numpy einsum path exactly
+    Rcw = torch.einsum('bij,bjk->bik', Ry, Rx)   # camera→world
+    Rwc = Rcw.transpose(1, 2)                    # world→camera
 
-    t   = np.stack([X, Y, Z], axis=-1)                  # (B,3)
-    twc = -np.einsum('bij,bj->bi', Rwc, t)              # world→camera translation
+    t   = torch.stack([x, y, z], dim=-1)         # (B,3)
+    twc = -torch.einsum('bij,bj->bi', Rwc, t)    # world→camera translation
 
-    E = np.zeros((B,4,4), dtype=np.float32)
+    E = torch.zeros((B, 4, 4), dtype=torch.float32, device=P.device)
     E[:, :3, :3] = Rwc
     E[:, :3,  3] = twc
     E[:,  3,  3] = 1.0
+
     return E
 
 

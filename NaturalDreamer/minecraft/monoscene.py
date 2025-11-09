@@ -146,7 +146,7 @@ class Upsample(nn.Module):
                 output_padding=1,
             ),
             norm_layer(out_channels, momentum=bn_momentum),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
         )
 
     def forward(self, x):
@@ -212,7 +212,7 @@ class ASPP(nn.Module):
         self.bn2 = nn.ModuleList(
             [nn.BatchNorm3d(planes) for dil in dilations_conv_list]
         )
-        self.relu = nn.ReLU()
+        self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x_in):
 
@@ -334,14 +334,20 @@ class FLoSP(nn.Module):
         self.scene_size = scene_size
         self.projection_scale = projection_scale
 
-    def forward(self, inputs: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
-        x2d, img_indices = inputs
+    def forward(self, inputs: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> torch.Tensor:
+        x2d, projected_pix, fov_mask = inputs
         B, C, H, W = x2d.shape
-        N = img_indices.shape[1]
+        N = projected_pix.shape[1]
 
         src = x2d.view(B, C, H * W)                                    # (B, C, HW)
         zero_col = torch.zeros(B, C, 1, dtype=src.dtype, device=src.device)
         src_padded = torch.cat([src, zero_col], dim=2)                  # (B, C, HW+1)
+
+        # Compute flattened image indices from (x,y); mask out-of-FOV to HW (the padded zero)
+        pix_x, pix_y = projected_pix[..., 0], projected_pix[..., 1]                                    # (B, N)
+        img_indices = pix_y * W + pix_x                                 # (B, N)
+        img_indices = img_indices.masked_fill(~fov_mask, H * W)         # (B, N)
+        img_indices = img_indices.long()
 
         # Gather features: expand indices across channel dim
         gather_idx = img_indices.unsqueeze(1).expand(B, C, N)           # (B, C, N)
@@ -394,7 +400,7 @@ class UNet3D(nn.Module):
         self.up_l1_lfull = nn.Sequential(
             nn.Conv3d(feature, feature // 2, kernel_size=1, stride=1, padding=0, bias=False),
             norm_layer(feature // 2, momentum=bn_momentum),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
         )
         self.out_conv = nn.Conv3d(feature // 2, feature // 2, kernel_size=1, padding=0, stride=1)
 
@@ -439,7 +445,7 @@ class SegmentationHead(nn.Module):
         )
         self.bn2 = nn.ModuleList([nn.BatchNorm3d(c_in) for _ in dilations])
 
-        self.relu = nn.ReLU()
+        self.relu = nn.ReLU(inplace=True)
 
         out_ch = classes # len(classes) + sum(classes)
         self.conv_classes = nn.Conv3d(c_in, out_ch, kernel_size=3, padding=1, stride=1)

@@ -1,9 +1,11 @@
 import torch
 import torch.nn as nn
+from torch import profiler
 from torch.distributions import kl_divergence, Independent, OneHotCategoricalStraightThrough, Normal
 import numpy as np
 import os
 
+from NaturalDreamer.utils import symlog
 from NaturalDreamer.minecraft.loss import CE_ssc_loss
 from NaturalDreamer.minecraft.minecraft import MinecraftSegmentationHead, get_classes
 from NaturalDreamer.minecraft.utils import (
@@ -13,7 +15,7 @@ from NaturalDreamer.minecraft.utils import (
 from malmoenv.world_tracking.utils import decode_world_update
 from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, ContinueModel, EncoderConv, DecoderConv, Actor, Critic, \
     HybridActor
-from utils import computeLambdaValues, Moments
+from utils import computeLambdaValues, Moments, collapse_world_updates
 from buffer import ReplayBuffer
 import imageio
 
@@ -45,8 +47,6 @@ class Dreamer:
         self.priorNet        = PriorNet(config.recurrentSize, config.latentLength, config.latentClasses,                             config.priorNet       ).to(self.device)
         self.posteriorNet    = PosteriorNet(config.recurrentSize + config.encodedObsSize, config.latentLength, config.latentClasses, config.posteriorNet   ).to(self.device)
         self.rewardPredictor = RewardModel(self.fullStateSize,                                                                       config.reward         ).to(self.device)
-        if config.useContinuationPrediction:
-            self.continuePredictor  = ContinueModel(self.fullStateSize,                                                              config.continuation   ).to(self.device)
 
         self.buffer         = ReplayBuffer(observationShape, self.actionSize, config.buffer, device)
         self.valueMoments   = Moments(device)
@@ -56,18 +56,20 @@ class Dreamer:
         self.block_state_registry_lut = None
         self.classes = config.minecraft.classes
         self.minecraftSegmentationHead = MinecraftSegmentationHead(self.config, self.device, self.fullStateSize,
-                                                                   self.observationShape, self.classes)
+                                                                   self.observationShape, self.classes).to(self.device)
 
         self.worldModelParameters = (list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.recurrentModel.parameters()) +
-                                     list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()) +
-                                     list(self.minecraftSegmentationHead.parameters()))
+                                     list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()))
 
-        # if self.config.useContinuationPrediction:
-        #     self.worldModelParameters += list(self.continuePredictor.parameters())
 
         self.worldModelOptimizer    = torch.optim.Adam(self.worldModelParameters,   lr=self.config.worldModelLR)
+        self.minecraftHeadOptimiser = torch.optim.Adam(self.minecraftSegmentationHead.parameters(), self.config.worldModelLR)
         self.actorOptimizer         = torch.optim.Adam(self.actor.parameters(),     lr=self.config.actorLR)
         self.criticOptimizer        = torch.optim.Adam(self.critic.parameters(),    lr=self.config.criticLR)
+
+        # self.amp_enabled = device.type == "cuda"
+        # self.amp_dtype = (torch.bfloat16 if (self.amp_enabled and torch.cuda.is_bf16_supported()) else torch.float16)
+        # self.amp_scaler = torch.amp.GradScaler("cude", enabled=self.amp_enabled)
 
         self.totalEpisodes      = 0
         self.totalEnvSteps      = 0
@@ -88,6 +90,7 @@ class Dreamer:
 
         recurrentStates, priorsLogits, posteriors, posteriorsLogits = [], [], [], []
         reconstruction3DLoss = 0
+        reconstruction3D_CE = 0.0
         for t in range(1, self.config.batchLength):
             first_t = data.is_first[:, t].float()
 
@@ -108,18 +111,28 @@ class Dreamer:
             previousLatentState = posterior
 
             camera_position, grid_origin, grid = next(data.world_trajectories)
+            camera_position = torch.from_numpy(camera_position).to(self.device)
             grid_origin = torch.from_numpy(grid_origin).to(self.device)
             grid = torch.from_numpy(grid).to(self.device)  # torch.Size([1, 20, 20, 20])
-            block_id_grid = self.block_state_registry_lut[grid.long()] #TODO Do not need this maping in final version
+            block_id_grid = self.block_state_registry_lut[grid.long()] #TODO Do not need this mapping in final version
             full_state_step = torch.cat((recurrentState, posterior), dim=-1)
-            reconstruction3DLatent = self.minecraftSegmentationHead(full_state_step, camera_position, grid_origin)
-            #
-            H, W, D = block_id_grid.shape[1:]
+
+            ssc_input = full_state_step.detach().requires_grad_(True)
+            reconstruction3DLatent, mask3d = self.minecraftSegmentationHead(ssc_input, camera_position, grid_origin)
+
+
             num_classes = reconstruction3DLatent.shape[1]
             class_weight = torch.ones(num_classes, device=self.device)
             #TODO may be croped on top
-            #TODO only last itteration is effected. Add += or move all gradient computations to loop
-            reconstruction3DLoss = CE_ssc_loss(reconstruction3DLatent[:, :, :H, :, :], block_id_grid.long(), class_weight) #TODO how to avarage CE_ssc_loss?
+            target = block_id_grid.masked_fill_(~mask3d.reshape(block_id_grid.shape), -1)
+            loss3d = CE_ssc_loss(reconstruction3DLatent, target, class_weight)
+            reconstruction3D_CE += loss3d.detach()
+
+            self.minecraftHeadOptimiser.zero_grad(set_to_none=True)
+            loss3d.backward()
+            ssc_gradients = ssc_input.grad.detach()
+            self.minecraftHeadOptimiser.step()
+            reconstruction3DLoss = reconstruction3DLoss + (full_state_step * ssc_gradients).sum()
 
         recurrentStates             = torch.stack(recurrentStates,              dim=1) # (batchSize, batchLength-1, recurrentSize)
         priorsLogits                = torch.stack(priorsLogits,                 dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
@@ -127,9 +140,15 @@ class Dreamer:
         posteriorsLogits            = torch.stack(posteriorsLogits,             dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
         fullStates                  = torch.cat((recurrentStates, posteriors), dim=-1) # (batchSize, batchLength-1, recurrentSize + latentLength*latentClasses)
 
-        reconstructionMeans        =  self.decoder(fullStates.view(-1, self.fullStateSize)).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
-        reconstructionDistribution =  Independent(Normal(reconstructionMeans, 1), len(self.observationShape))
-        reconstructionLoss         = -reconstructionDistribution.log_prob(data.observations[:, 1:]).mean()
+        # reconstructionMeans        =  self.decoder(fullStates.view(-1, self.fullStateSize)).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
+        # reconstructionDistribution =  Independent(Normal(reconstructionMeans, 1), len(self.observationShape))
+        # reconstructionLoss         = -reconstructionDistribution.log_prob(data.observations[:, 1:]).mean()
+
+        reconstructionMeans_raw = self.decoder(fullStates.view(-1, self.fullStateSize)).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
+        reconstructionMeans_symlog = symlog(reconstructionMeans_raw)
+        target_symlog = symlog(data.observations[:, 1:])
+        reconstructionDistribution = Normal(reconstructionMeans_symlog, 1.0)
+        reconstructionLoss = -reconstructionDistribution.log_prob(target_symlog).mean()
 
         rewardDistribution  =  self.rewardPredictor(fullStates)
         rewardLoss          = -rewardDistribution.log_prob(data.rewards[:, 1:].squeeze(-1)).mean()
@@ -146,14 +165,10 @@ class Dreamer:
         priorLoss       = self.config.betaPrior*torch.maximum(priorLoss, freeNats)
         posteriorLoss   = self.config.betaPosterior*torch.maximum(posteriorLoss, freeNats)
         klLoss          = (priorLoss + posteriorLoss).mean()
+        reconstruction3DLoss = reconstruction3DLoss / (self.config.batchLength - 1)
+        reconstruction3D_CE = reconstruction3D_CE / (self.config.batchLength - 1)
 
         worldModelLoss =  reconstructionLoss + rewardLoss + klLoss + reconstruction3DLoss # I think that the reconstruction loss is relatively a bit too high (11k)
-        
-        if self.config.useContinuationPrediction:
-            # TODO The useContinuationPrediction will not work. The bug from natural dreamer implementation
-            continueDistribution = self.continuePredictor(fullStates)
-            continueLoss         = nn.BCELoss(continueDistribution.probs, 1 - data.dones[:, 1:])
-            worldModelLoss      += continueLoss.mean()
 
         self.worldModelOptimizer.zero_grad()
         #TODO Add loss masking
@@ -165,6 +180,7 @@ class Dreamer:
         metrics = {
             "worldModelLoss"        : worldModelLoss.item() - klLossShiftForGraphing,
             "reconstructionLoss"    : reconstructionLoss.item(),
+            "reconstruction3DLoss": reconstruction3D_CE,
             "rewardPredictorLoss"   : rewardLoss.item(),
             "klLoss"                : klLoss.item() - klLossShiftForGraphing}
         return fullStates.view(-1, self.fullStateSize).detach(), metrics
@@ -188,7 +204,7 @@ class Dreamer:
         
         predictedRewards = self.rewardPredictor(fullStates[:, :-1]).mean
         values           = self.critic(fullStates).mean
-        continues        = self.continuePredictor(fullStates).mean if self.config.useContinuationPrediction else torch.full_like(predictedRewards, self.config.discount)
+        continues        = torch.full_like(predictedRewards, self.config.discount)
         lambdaValues     = computeLambdaValues(predictedRewards, values, continues, self.config.lambda_)
 
         _, inverseScale = self.valueMoments(lambdaValues)
@@ -220,7 +236,9 @@ class Dreamer:
 
 
     @torch.no_grad()
-    def environmentInteraction(self, env, numEpisodes, seed=None, evaluation=False, saveVideo=False, filename="videos/unnamedVideo", fps=30, macroBlockSize=16):
+    def environmentInteraction(self, env, numEpisodes,
+                               seed=None, evaluation=False, saveVideo=False, filename="videos/unnamedVideo", fps=30, macroBlockSize=16):
+        action_repeat = self.config.actionRepeat
         scores = []
         for i in range(numEpisodes):
             recurrentState = torch.zeros(1, self.recurrentSize, device=self.device)
@@ -246,26 +264,41 @@ class Dreamer:
                 latentState, _ = self.posteriorNet(torch.cat((recurrentState, encodedObservation.view(1, -1)), -1))
 
                 actionFlat, _, _ = self.actor(torch.cat((recurrentState, latentState), -1))
-                nextObservation, reward, done, info = env.step(actionFlat.cpu().numpy().reshape(-1))
                 prevActionVec = actionFlat
 
-                if not evaluation:
-                    self.buffer.add(observation, world_state, camera_position, prevActionVec.cpu().numpy().reshape(-1), reward, done, is_first)
-                    world_state = decode_world_update(info["world_observation"])
-                    camera_position = extract_camera_position_from_info(info)
-                is_first = False
+                totalReward = 0.0
+                world_updates = []
 
-                if saveVideo and i == 0:
-                    frame = env.render()
-                    targetHeight = (frame.shape[0] + macroBlockSize - 1)//macroBlockSize*macroBlockSize # getting rid of imagio warning
-                    targetWidth = (frame.shape[1] + macroBlockSize - 1)//macroBlockSize*macroBlockSize
-                    frames.append(np.pad(frame, ((0, targetHeight - frame.shape[0]), (0, targetWidth - frame.shape[1]), (0, 0)), mode='edge'))
+                for rep in range(action_repeat):
+                    nextObservation, reward, done, info = env.step(actionFlat.cpu().numpy().reshape(-1))
+                    totalReward += reward
+
+                    # stream update per low-level tick
+                    next_world_state = decode_world_update(info["world_observation"])
+                    next_camera_position = extract_camera_position_from_info(info)
+                    world_updates.append(next_world_state)
+
+                    if saveVideo and i == 0:
+                        frame = env.render()
+                        targetHeight = (frame.shape[0] + macroBlockSize - 1)//macroBlockSize*macroBlockSize
+                        targetWidth = (frame.shape[1] + macroBlockSize - 1)//macroBlockSize*macroBlockSize
+                        frames.append(np.pad(frame, ((0, targetHeight - frame.shape[0]), (0, targetWidth - frame.shape[1]), (0, 0)), mode='edge'))
+
+                    stepCount += 1
+                    if done:
+                        break
+
+
+                if not evaluation:
+                    self.buffer.add(observation, world_state, camera_position, prevActionVec.cpu().numpy().reshape(-1), totalReward, done, is_first)
+                    world_state = collapse_world_updates(world_updates)
+                    camera_position = next_camera_position
+                is_first = False
 
                 encodedObservation = self.encoder(torch.from_numpy(nextObservation).float().unsqueeze(0).to(self.device))
                 observation = nextObservation
-                
-                currentScore += reward
-                stepCount += 1
+                currentScore += totalReward
+
                 if done:
                     scores.append(currentScore)
                     if not evaluation:
@@ -300,8 +333,6 @@ class Dreamer:
             'totalEpisodes'         : self.totalEpisodes,
             'totalEnvSteps'         : self.totalEnvSteps,
             'totalGradientSteps'    : self.totalGradientSteps}
-        if self.config.useContinuationPrediction:
-            checkpoint['continuePredictor'] = self.continuePredictor.state_dict()
         torch.save(checkpoint, checkpointPath)
 
 
@@ -326,6 +357,4 @@ class Dreamer:
         self.totalEpisodes = checkpoint['totalEpisodes']
         self.totalEnvSteps = checkpoint['totalEnvSteps']
         self.totalGradientSteps = checkpoint['totalGradientSteps']
-        if self.config.useContinuationPrediction:
-            self.continuePredictor.load_state_dict(checkpoint['continuePredictor'])
 

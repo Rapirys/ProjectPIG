@@ -4,19 +4,18 @@ import gymnasium as gym
 import torch
 import argparse
 import os
+
+from torch.backends import cudnn
 from tqdm.auto import tqdm  # add
 from dreamer    import Dreamer
-from utils      import loadConfig, seedEverything, plotMetrics
+from utils      import loadConfig, seedEverything, plotMetrics, _now_sync
 from envs import getEnvProperties, GymPixelsProcessingWrapper, CleanGymWrapper, make_env
 from utils      import saveLossesToCSV, ensureParentFolders
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = True
+cudnn.allow_tf32 = True
 print(device)
-
-def _now_sync():
-    """Wall-clock time with a CUDA sync so GPU kernels are accounted for."""
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    return time.perf_counter()
 
 def run(configFile):
     config = loadConfig(configFile)
@@ -65,11 +64,6 @@ def run(configFile):
 
             # show timings on the bar
             pbar.set_postfix(sample=f"{dt_sample:.2f}s", wm=f"{dt_wm:.2f}s", beh=f"{dt_beh:.2f}s", step=f"{dt_step:.2f}s")
-
-            # (optional) print a line when something is abnormally slow
-            if dt_step > 3.0:
-                print(f"[slow] iter {iteration} step {step_idx}: sample {dt_sample:.2f}s | world {dt_wm:.2f}s | beh {dt_beh:.2f}s | total {dt_step:.2f}s")
-
             dreamer.totalGradientSteps += 1
             pbar.update(1)
 
