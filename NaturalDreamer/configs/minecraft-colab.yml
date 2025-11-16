@@ -6,9 +6,9 @@ gradientSteps: 60000
 replayRatio: 200
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
-checkpointInterval: 500
+checkpointInterval: 300
 resume: False #True
-checkpointToLoad: 3k
+checkpointToLoad: 0k
 #
 episodesBeforeStart: 1
 numInteractionEpisodes: 1
@@ -18,11 +18,11 @@ numEvaluationEpisodes: 1
 dreamer:
   actionRepeat: 3
   batchSize: 8
-  batchLength: 32
-  imaginationHorizon: 196
+  batchLength: 16
+  imaginationHorizon: 64
 
   recurrentSize: 1024 #1024*8
-  latentLength: 16 #32
+  latentLength: 32 #32
   latentClasses: 32 #64
   encodedObsSize: 2048
   resolution: [256, 448]
@@ -107,7 +107,7 @@ dreamer:
 
 
 folderNames:
-  metricsFolder: /content/drive/MyDrive/NaturalDreamer/metrics
-  plotsFolder: /content/drive/MyDrive/NaturalDreamer/plots
-  checkpointsFolder: /content/drive/MyDrive/NaturalDreamer/checkpoints
-  videosFolder: /content/drive/MyDrive/NaturalDreamer/videos
+  metricsFolder: metrics
+  plotsFolder: plots
+  checkpointsFolder: checkpoints
+  videosFolder: videos

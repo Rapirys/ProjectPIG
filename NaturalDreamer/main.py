@@ -70,7 +70,7 @@ def run(configFile):
 def main(argv=None):
     parser = argparse.ArgumentParser()
     # parser.add_argument("--config", type=str, default="car-racing-v3.yml")
-    parser.add_argument("--config", type=str, default="minecraft-long.yml")
+    parser.add_argument("--config", type=str, default="minecraft-colab.yml")
     run(parser.parse_args(argv).config)
 
 

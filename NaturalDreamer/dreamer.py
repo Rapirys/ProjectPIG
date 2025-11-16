@@ -1,3 +1,4 @@
+import cv2
 import torch
 import torch.nn as nn
 from torch import profiler
@@ -119,7 +120,6 @@ class Dreamer:
 
             ssc_input = full_state_step.detach().requires_grad_(True)
             reconstruction3DLatent, mask3d = self.minecraftSegmentationHead(ssc_input, camera_position, grid_origin)
-
 
             num_classes = reconstruction3DLatent.shape[1]
             class_weight = torch.ones(num_classes, device=self.device)
@@ -310,49 +310,51 @@ class Dreamer:
                                 video.append_data(frame)
                     break
         return sum(scores)/numEpisodes if numEpisodes else None, stepCount
-    
 
     def saveCheckpoint(self, checkpointPath):
         if not checkpointPath.endswith('.pth'):
             checkpointPath += '.pth'
 
         checkpoint = {
-            'encoder'               : self.encoder.state_dict(),
-            'decoder'               : self.decoder.state_dict(),
-            'recurrentModel'        : self.recurrentModel.state_dict(),
-            'priorNet'              : self.priorNet.state_dict(),
-            'posteriorNet'          : self.posteriorNet.state_dict(),
-            'rewardPredictor'       : self.rewardPredictor.state_dict(),
-            'actor'                 : self.actor.state_dict(),
-            'critic'                : self.critic.state_dict(),
-            'worldModelOptimizer'   : self.worldModelOptimizer.state_dict(),
-            'criticOptimizer'       : self.criticOptimizer.state_dict(),
-            'actorOptimizer'        : self.actorOptimizer.state_dict(),
-            'totalEpisodes'         : self.totalEpisodes,
-            'totalEnvSteps'         : self.totalEnvSteps,
-            'totalGradientSteps'    : self.totalGradientSteps}
+            "encoder": self.encoder.state_dict(),
+            "decoder": self.decoder.state_dict(),
+            "recurrentModel": self.recurrentModel.state_dict(),
+            "priorNet": self.priorNet.state_dict(),
+            "posteriorNet": self.posteriorNet.state_dict(),
+            "rewardPredictor": self.rewardPredictor.state_dict(),
+            "actor": self.actor.state_dict(),
+            "critic": self.critic.state_dict(),
+            "minecraftSegmentationHead": self.minecraftSegmentationHead.state_dict(),
+            "minecraftHeadOptimiser": self.minecraftHeadOptimiser.state_dict(),
+            "worldModelOptimizer": self.worldModelOptimizer.state_dict(),
+            "criticOptimizer": self.criticOptimizer.state_dict(),
+            "actorOptimizer": self.actorOptimizer.state_dict(),
+            "totalEpisodes": self.totalEpisodes,
+            "totalEnvSteps": self.totalEnvSteps,
+            "totalGradientSteps": self.totalGradientSteps,
+        }
         torch.save(checkpoint, checkpointPath)
 
-
     def loadCheckpoint(self, checkpointPath):
-        if not checkpointPath.endswith('.pth'):
-            checkpointPath += '.pth'
+        if not checkpointPath.endswith(".pth"):
+            checkpointPath += ".pth"
         if not os.path.exists(checkpointPath):
             raise FileNotFoundError(f"Checkpoint file not found at: {checkpointPath}")
-        
-        checkpoint = torch.load(checkpointPath, map_location=self.device)
-        self.encoder.load_state_dict(checkpoint['encoder'])
-        self.decoder.load_state_dict(checkpoint['decoder'])
-        self.recurrentModel.load_state_dict(checkpoint['recurrentModel'])
-        self.priorNet.load_state_dict(checkpoint['priorNet'])
-        self.posteriorNet.load_state_dict(checkpoint['posteriorNet'])
-        self.rewardPredictor.load_state_dict(checkpoint['rewardPredictor'])
-        self.actor.load_state_dict(checkpoint['actor'])
-        self.critic.load_state_dict(checkpoint['critic'])
-        self.worldModelOptimizer.load_state_dict(checkpoint['worldModelOptimizer'])
-        self.criticOptimizer.load_state_dict(checkpoint['criticOptimizer'])
-        self.actorOptimizer.load_state_dict(checkpoint['actorOptimizer'])
-        self.totalEpisodes = checkpoint['totalEpisodes']
-        self.totalEnvSteps = checkpoint['totalEnvSteps']
-        self.totalGradientSteps = checkpoint['totalGradientSteps']
 
+        checkpoint = torch.load(checkpointPath, map_location=self.device)
+        self.encoder.load_state_dict(checkpoint["encoder"])
+        self.decoder.load_state_dict(checkpoint["decoder"])
+        self.recurrentModel.load_state_dict(checkpoint["recurrentModel"])
+        self.priorNet.load_state_dict(checkpoint["priorNet"])
+        self.posteriorNet.load_state_dict(checkpoint["posteriorNet"])
+        self.rewardPredictor.load_state_dict(checkpoint["rewardPredictor"])
+        self.actor.load_state_dict(checkpoint["actor"])
+        self.critic.load_state_dict(checkpoint["critic"])
+        # self.minecraftSegmentationHead.load_state_dict(checkpoint["minecraftSegmentationHead"])
+        # self.minecraftHeadOptimiser.load_state_dict(checkpoint["minecraftHeadOptimiser"])
+        self.worldModelOptimizer.load_state_dict(checkpoint["worldModelOptimizer"])
+        self.criticOptimizer.load_state_dict(checkpoint["criticOptimizer"])
+        self.actorOptimizer.load_state_dict(checkpoint["actorOptimizer"])
+        self.totalEpisodes = checkpoint["totalEpisodes"]
+        self.totalEnvSteps = checkpoint["totalEnvSteps"]
+        self.totalGradientSteps = checkpoint["totalGradientSteps"]
