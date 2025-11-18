@@ -176,7 +176,7 @@ class Dreamer:
         metrics = {
             "worldModelLoss"        : worldModelLoss.item() - klLossShiftForGraphing,
             "reconstructionLoss"    : reconstructionLoss.item(),
-            "reconstruction3DLoss": reconstruction3D_CE.item(),
+            "reconstruction3DLoss"  :  reconstruction3D_CE.item() if enable3dLoss else 0,
             "rewardPredictorLoss"   : rewardLoss.item(),
             "klLoss"                : klLoss.item() - klLossShiftForGraphing}
         return fullStates.view(-1, self.fullStateSize).detach(), metrics
