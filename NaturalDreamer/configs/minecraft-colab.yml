@@ -109,5 +109,5 @@ dreamer:
 folderNames:
   metricsFolder: /content/drive/MyDrive/NaturalDreamer/metrics
   plotsFolder: /content/plots
-  checkpointsFolder: /content/checkpoints
+  checkpointsFolder: /content/drive/MyDrive/NaturalDreamer/checkpoints
   videosFolder: /content/videos
