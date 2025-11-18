@@ -48,7 +48,7 @@ def run(configFile):
 
         for step_idx in range(steps_taken):
             sampledData = dreamer.buffer.sample(dreamer.config.batchSize, dreamer.config.batchLength)
-            initialStates, worldModelMetrics = dreamer.worldModelTraining(sampledData)
+            initialStates, worldModelMetrics = dreamer.worldModelTraining(sampledData, enable3dLoss = False)
             behaviorMetrics = dreamer.behaviorTraining(initialStates)
 
             # show timings on the bar

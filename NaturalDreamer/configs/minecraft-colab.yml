@@ -1,14 +1,14 @@
 environmentName: Minecraft
-runName: Minecraft-Test-Run
+runName: Minecraft-Training-2D
 seed: 1
 
 gradientSteps: 60000
 replayRatio: 200
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
-checkpointInterval: 300
-resume: False #True
-checkpointToLoad: 0k
+checkpointInterval: 900
+resume: False
+checkpointToLoad: 1k
 #
 episodesBeforeStart: 1
 numInteractionEpisodes: 1

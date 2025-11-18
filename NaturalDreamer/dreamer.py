@@ -58,6 +58,7 @@ class Dreamer:
         self.classes = config.minecraft.classes
         self.minecraftSegmentationHead = MinecraftSegmentationHead(self.config, self.device, self.fullStateSize,
                                                                    self.observationShape, self.classes).to(self.device)
+        self.enable3dLoss = config.enable3dLoss
 
         self.worldModelParameters = (list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.recurrentModel.parameters()) +
                                      list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()))
@@ -84,7 +85,7 @@ class Dreamer:
         if "macro"   in a: parts.append(a["macro"])
         return torch.cat(parts, -1) if parts else None
 
-    def worldModelTraining(self, data):
+    def worldModelTraining(self, data, enable3dLoss = True):
         encodedObservations = self.encoder(data.observations.view(-1, *self.observationShape)).view(self.config.batchSize, self.config.batchLength, -1)
         previousRecurrentState = torch.zeros(self.config.batchSize, self.recurrentSize, device=self.device)
         previousLatentState = torch.zeros(self.config.batchSize, self.latentSize, device=self.device)
@@ -119,20 +120,21 @@ class Dreamer:
             full_state_step = torch.cat((recurrentState, posterior), dim=-1)
 
             ssc_input = full_state_step.detach().requires_grad_(True)
-            reconstruction3DLatent, mask3d = self.minecraftSegmentationHead(ssc_input, camera_position, grid_origin)
+            if enable3dLoss:
+                reconstruction3DLatent, mask3d = self.minecraftSegmentationHead(ssc_input, camera_position, grid_origin)
 
-            num_classes = reconstruction3DLatent.shape[1]
-            class_weight = torch.ones(num_classes, device=self.device)
-            #TODO may be croped on top
-            target = block_id_grid.masked_fill_(~mask3d.reshape(block_id_grid.shape), -1)
-            loss3d = CE_ssc_loss(reconstruction3DLatent, target, class_weight)
-            reconstruction3D_CE += loss3d.detach()
+                num_classes = reconstruction3DLatent.shape[1]
+                class_weight = torch.ones(num_classes, device=self.device)
+                #TODO may be croped on top
+                target = block_id_grid.masked_fill_(~mask3d.reshape(block_id_grid.shape), -1)
+                loss3d = CE_ssc_loss(reconstruction3DLatent, target, class_weight)
+                reconstruction3D_CE += loss3d.detach()
 
-            self.minecraftHeadOptimiser.zero_grad(set_to_none=True)
-            loss3d.backward()
-            ssc_gradients = ssc_input.grad.detach()
-            self.minecraftHeadOptimiser.step()
-            reconstruction3DLoss = reconstruction3DLoss + (full_state_step * ssc_gradients).sum()
+                self.minecraftHeadOptimiser.zero_grad(set_to_none=True)
+                loss3d.backward()
+                ssc_gradients = ssc_input.grad.detach()
+                self.minecraftHeadOptimiser.step()
+                reconstruction3DLoss = reconstruction3DLoss + (full_state_step * ssc_gradients).sum()
 
         recurrentStates             = torch.stack(recurrentStates,              dim=1) # (batchSize, batchLength-1, recurrentSize)
         priorsLogits                = torch.stack(priorsLogits,                 dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
@@ -140,9 +142,6 @@ class Dreamer:
         posteriorsLogits            = torch.stack(posteriorsLogits,             dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
         fullStates                  = torch.cat((recurrentStates, posteriors), dim=-1) # (batchSize, batchLength-1, recurrentSize + latentLength*latentClasses)
 
-        # reconstructionMeans        =  self.decoder(fullStates.view(-1, self.fullStateSize)).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
-        # reconstructionDistribution =  Independent(Normal(reconstructionMeans, 1), len(self.observationShape))
-        # reconstructionLoss         = -reconstructionDistribution.log_prob(data.observations[:, 1:]).mean()
 
         reconstructionMeans = self.decoder(fullStates.view(-1, self.fullStateSize)).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
         reconstructionMeans = symlog(reconstructionMeans)
@@ -341,7 +340,8 @@ class Dreamer:
         if not os.path.exists(checkpointPath):
             raise FileNotFoundError(f"Checkpoint file not found at: {checkpointPath}")
 
-        checkpoint = torch.load(checkpointPath, map_location=self.device)
+
+        checkpoint = torch.load(checkpointPath, map_location='cpu')
         self.encoder.load_state_dict(checkpoint["encoder"])
         self.decoder.load_state_dict(checkpoint["decoder"])
         self.recurrentModel.load_state_dict(checkpoint["recurrentModel"])
@@ -350,8 +350,8 @@ class Dreamer:
         self.rewardPredictor.load_state_dict(checkpoint["rewardPredictor"])
         self.actor.load_state_dict(checkpoint["actor"])
         self.critic.load_state_dict(checkpoint["critic"])
-        # self.minecraftSegmentationHead.load_state_dict(checkpoint["minecraftSegmentationHead"])
-        # self.minecraftHeadOptimiser.load_state_dict(checkpoint["minecraftHeadOptimiser"])
+        self.minecraftSegmentationHead.load_state_dict(checkpoint["minecraftSegmentationHead"])
+        self.minecraftHeadOptimiser.load_state_dict(checkpoint["minecraftHeadOptimiser"])
         self.worldModelOptimizer.load_state_dict(checkpoint["worldModelOptimizer"])
         self.criticOptimizer.load_state_dict(checkpoint["criticOptimizer"])
         self.actorOptimizer.load_state_dict(checkpoint["actorOptimizer"])
