@@ -58,7 +58,6 @@ class Dreamer:
         self.classes = config.minecraft.classes
         self.minecraftSegmentationHead = MinecraftSegmentationHead(self.config, self.device, self.fullStateSize,
                                                                    self.observationShape, self.classes).to(self.device)
-        self.enable3dLoss = config.enable3dLoss
 
         self.worldModelParameters = (list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.recurrentModel.parameters()) +
                                      list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()))
