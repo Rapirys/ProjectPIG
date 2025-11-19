@@ -17,13 +17,13 @@ numEvaluationEpisodes: 1
 
 dreamer:
   actionRepeat: 3
-  batchSize: 32
-  batchLength: 64
+  batchSize: 16
+  batchLength: 32
   imaginationHorizon: 32
 
   recurrentSize: 4096 #1024*8
-  latentLength: 32 #32
-  latentClasses: 64 #64
+  latentLength: 4 #32
+  latentClasses: 8 #64
   encodedObsSize: 2048
 #  resolution: [256, 448]
 #  resolution: [160, 368]
