@@ -17,17 +17,17 @@ numEvaluationEpisodes: 1
 
 dreamer:
   actionRepeat: 3
-  batchSize: 8
-  batchLength: 16
-  imaginationHorizon: 64
+  batchSize: 32
+  batchLength: 64
+  imaginationHorizon: 32
 
-  recurrentSize: 1024 #1024*8
+  recurrentSize: 4096 #1024*8
   latentLength: 32 #32
-  latentClasses: 32 #64
+  latentClasses: 64 #64
   encodedObsSize: 2048
-  resolution: [256, 448]
+#  resolution: [256, 448]
 #  resolution: [160, 368]
-#  resolution: [ 64, 96 ]
+  resolution: [ 64, 64 ]
 
   actorLR: 0.00004
   criticLR: 0.0001
@@ -60,28 +60,29 @@ dreamer:
     activation: Tanh
 
   recurrentModel:
-    hiddenSize: 200
+    hiddenSize: 512
+    num_blocks: 4
     activation: Tanh
 
   priorNet:
-    hiddenSize: 200
+    hiddenSize: 1024
     numLayers: 2
     activation: Tanh
     uniformMix: 0.01
 
   posteriorNet:
-    hiddenSize: 200
+    hiddenSize: 1024
     numLayers: 2
     activation: Tanh
     uniformMix: 0.01
 
   reward:
-    hiddenSize: 400
+    hiddenSize: 1024
     numLayers: 2
     activation: Tanh
 
   continuation:
-    hiddenSize: 400
+    hiddenSize: 1024
     numLayers: 3
     activation: Tanh
 
@@ -107,7 +108,13 @@ dreamer:
 
 
 folderNames:
-  metricsFolder: /content/drive/MyDrive/NaturalDreamer/metrics
-  plotsFolder: /content/plots
-  checkpointsFolder: /content/drive/MyDrive/NaturalDreamer/checkpoints
-  videosFolder: /content/videos
+  metricsFolder: metrics
+  plotsFolder: plots
+  checkpointsFolder: checkpoints
+  videosFolder: videos
+
+
+#/home/rapirys/PycharmProjects/ProjectPIG/NaturalDreamer/checkpoints/Minecraft_Minecraft-Training_2k.pth
+#/home/rapirys/PycharmProjects/ProjectPIG/NaturalDreamer/checkpoints/Minecraft_Minecraft-Training_2k.pth
+
+
