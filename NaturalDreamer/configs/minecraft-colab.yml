@@ -17,7 +17,7 @@ numEvaluationEpisodes: 1
 
 dreamer:
   actionRepeat: 3
-  batchSize: 16
+  batchSize: 32
   batchLength: 32
   imaginationHorizon: 32
 
