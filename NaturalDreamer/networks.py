@@ -12,11 +12,26 @@ class RecurrentModel(nn.Module):
         self.config = config
         self.activation = getattr(nn, self.config.activation)()
 
-        self.linear = nn.Linear(latentSize + actionSize, self.config.hiddenSize)
-        self.recurrent = nn.GRUCell(self.config.hiddenSize, recurrentSize)
+        self.input_proj = nn.Linear(latentSize + actionSize, self.config.hiddenSize)
 
-    def forward(self, recurrentState, latentState, action):
-        return self.recurrent(self.activation(self.linear(torch.cat((latentState, action), -1))), recurrentState)
+        self.num_blocks = self.config.numBlocks
+        self.block_size = recurrentSize // self.num_blocks  # total = num_blocks × block_size (DreamerV3)
+        self.block_cells = nn.ModuleList(
+            [nn.GRUCell(self.config.hiddenSize, self.block_size) for _ in range(self.num_blocks)]
+        )
+
+    def forward(self, recurrent_state, latent_state, action):
+        projected_input = self.activation(self.input_proj(torch.cat((latent_state, action), dim=-1)))
+        block_states = recurrent_state.split(self.block_size, dim=-1)
+
+        updated_blocks = []
+        for block_idx, gru_cell in enumerate(self.block_cells):
+            updated_block = gru_cell(projected_input, block_states[block_idx])
+            updated_blocks.append(updated_block)
+
+        updated_state = torch.cat(updated_blocks, dim=-1)
+        return updated_state
+
 
 
 class PriorNet(nn.Module):
