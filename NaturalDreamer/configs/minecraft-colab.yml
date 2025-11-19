@@ -108,13 +108,7 @@ dreamer:
 
 
 folderNames:
-  metricsFolder: metrics
-  plotsFolder: plots
-  checkpointsFolder: checkpoints
-  videosFolder: videos
-
-
-#/home/rapirys/PycharmProjects/ProjectPIG/NaturalDreamer/checkpoints/Minecraft_Minecraft-Training_2k.pth
-#/home/rapirys/PycharmProjects/ProjectPIG/NaturalDreamer/checkpoints/Minecraft_Minecraft-Training_2k.pth
-
-
+  metricsFolder: /content/drive/MyDrive/NaturalDreamer/metrics
+  plotsFolder: /content/plots
+  checkpointsFolder: /content/drive/MyDrive/NaturalDreamer/checkpoints
+  videosFolder: /content/videos
