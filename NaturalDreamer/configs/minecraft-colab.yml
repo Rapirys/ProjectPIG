@@ -1,12 +1,12 @@
 environmentName: Minecraft
-runName: Minecraft-Training-Attempt-3
+runName: Minecraft-Training-Attempt-4
 seed: 1
 
 gradientSteps: 60000
-replayRatio: 200
+envStepsPerTrainingStep: 16 #batchSize*batchLength/ number
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
-checkpointInterval: 1000
+checkpointInterval: 3000
 resume: False
 checkpointToLoad: 4k
 #
@@ -17,14 +17,14 @@ numEvaluationEpisodes: 1
 
 dreamer:
   actionRepeat: 1
-  batchSize: 16
-  batchLength: 32
+  batchSize: 24
+  batchLength: 48
   imaginationHorizon: 16
 
-  recurrentSize: 4096 #1024*8
+  recurrentSize: 8192 #1024*8
   latentLength: 32 #32
-  latentClasses: 32 #64
-  encodedObsSize: 2048
+  latentClasses: 64 #64
+  encodedObsSize: 4096
 #  resolution: [256, 448]
 #  resolution: [160, 368]
   resolution: [ 64, 64 ]
@@ -49,20 +49,20 @@ dreamer:
       scene_size: [20, 16, 20]
 
   encoder:
-    depth: 16
+    depth: 64
     stride: 2
     kernelSize: 4
     activation: ReLU
 
   decoder:
-    depth: 16
+    depth: 64
     stride: 2
     kernelSize: 4
     activation: ReLU
 
   recurrentModel:
-    hiddenSize: 512
-    numBlocks: 4
+    hiddenSize: 1024
+    numBlocks: 8
     activation: ReLU
 
   priorNet:
@@ -88,12 +88,12 @@ dreamer:
     activation: ReLU
 
   actor:
-    hiddenSize: 400
+    hiddenSize: 1024
     numLayers: 2
     activation: ReLU
 
   critic:
-    hiddenSize: 400
+    hiddenSize: 1024
     numLayers: 3
     activation: ReLU
 

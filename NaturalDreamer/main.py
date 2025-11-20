@@ -40,13 +40,13 @@ def run(configFile):
 
     dreamer.environmentInteraction(env, config.episodesBeforeStart, seed=config.seed)
 
-    iterationsNum = config.gradientSteps // config.replayRatio
+    iterationsNum = config.gradientSteps // config.dreamer.imaginationHorizon
     for iteration in range(iterationsNum):
         mostRecentScore, steps_taken = dreamer.environmentInteraction(env, config.numInteractionEpisodes, seed=config.seed)
         steps_taken = steps_taken // config.dreamer.actionRepeat
         pbar = tqdm(total=steps_taken, desc=f"Training for run: {iteration}", unit="step", leave=False)
 
-        for step_idx in range(steps_taken):
+        for step_idx in range(steps_taken // config.envStepsPerTrainingStep):
             sampledData = dreamer.buffer.sample(dreamer.config.batchSize, dreamer.config.batchLength)
             initialStates, worldModelMetrics = dreamer.worldModelTraining(sampledData, enable3dLoss = False)
             behaviorMetrics = dreamer.behaviorTraining(initialStates)
