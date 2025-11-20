@@ -111,15 +111,16 @@ class Dreamer:
             previousRecurrentState = recurrentState
             previousLatentState = posterior
 
-            camera_position, grid_origin, grid = next(data.world_trajectories)
-            camera_position = torch.from_numpy(camera_position).to(self.device)
-            grid_origin = torch.from_numpy(grid_origin).to(self.device)
-            grid = torch.from_numpy(grid).to(self.device)  # torch.Size([1, 20, 20, 20])
-            block_id_grid = self.block_state_registry_lut[grid.long()] #TODO Do not need this mapping in final version
-            full_state_step = torch.cat((recurrentState, posterior), dim=-1)
 
-            ssc_input = full_state_step.detach().requires_grad_(True)
             if enable3dLoss:
+                camera_position, grid_origin, grid = next(data.world_trajectories)
+                camera_position = torch.from_numpy(camera_position).to(self.device)
+                grid_origin = torch.from_numpy(grid_origin).to(self.device)
+                grid = torch.from_numpy(grid).to(self.device)
+                block_id_grid = self.block_state_registry_lut[grid.long()]  # TODO Do not need this mapping in final version
+                full_state_step = torch.cat((recurrentState, posterior), dim=-1)
+                ssc_input = full_state_step.detach().requires_grad_(True)
+
                 reconstruction3DLatent, mask3d = self.minecraftSegmentationHead(ssc_input, camera_position, grid_origin)
 
                 num_classes = reconstruction3DLatent.shape[1]
@@ -164,7 +165,7 @@ class Dreamer:
         reconstruction3DLoss = reconstruction3DLoss / (self.config.batchLength - 1)
         reconstruction3D_CE = reconstruction3D_CE / (self.config.batchLength - 1)
 
-        worldModelLoss =  reconstructionLoss + rewardLoss + klLoss + reconstruction3DLoss # I think that the reconstruction loss is relatively a bit too high (11k)
+        worldModelLoss =  self.config.reconstructionLossCoefficient * reconstructionLoss + rewardLoss + klLoss + reconstruction3DLoss # I think that the reconstruction loss is relatively a bit too high (11k)
 
         self.worldModelOptimizer.zero_grad()
         #TODO Add loss masking

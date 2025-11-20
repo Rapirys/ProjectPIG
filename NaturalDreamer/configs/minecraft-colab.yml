@@ -1,5 +1,5 @@
 environmentName: Minecraft
-runName: Minecraft-Training-2D
+runName: Minecraft-Training-Attempt-3
 seed: 1
 
 gradientSteps: 60000
@@ -7,8 +7,8 @@ replayRatio: 200
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
 checkpointInterval: 1000
-resume: True
-checkpointToLoad: 1k
+resume: False
+checkpointToLoad: 4k
 #
 episodesBeforeStart: 1
 numInteractionEpisodes: 1
@@ -16,14 +16,14 @@ numEvaluationEpisodes: 1
 
 
 dreamer:
-  actionRepeat: 3
+  actionRepeat: 1
   batchSize: 32
   batchLength: 32
-  imaginationHorizon: 32
+  imaginationHorizon: 16
 
   recurrentSize: 4096 #1024*8
-  latentLength: 4 #32
-  latentClasses: 8 #64
+  latentLength: 32 #32
+  latentClasses: 32 #64
   encodedObsSize: 2048
 #  resolution: [256, 448]
 #  resolution: [160, 368]
@@ -31,9 +31,10 @@ dreamer:
 
   actorLR: 0.00004
   criticLR: 0.0001
-  worldModelLR: 0.0002
+  worldModelLR: 0.0006
   gradientNormType: 2
   gradientClip: 100
+  reconstructionLossCoefficient: 10
 
   discount: 0.997
   lambda_: 0.95
@@ -43,7 +44,7 @@ dreamer:
   entropyScale: 0.0003
 
   buffer:
-    capacity: 10000 #TODO Bigger buffer in real training
+    capacity: 15000 #TODO Bigger buffer in real training
     minecraft:
       scene_size: [20, 16, 20]
 
@@ -51,50 +52,50 @@ dreamer:
     depth: 16
     stride: 2
     kernelSize: 4
-    activation: Tanh #TODO activation = RElU
+    activation: ReLU
 
   decoder:
     depth: 16
     stride: 2
     kernelSize: 4
-    activation: Tanh
+    activation: ReLU
 
   recurrentModel:
     hiddenSize: 512
     numBlocks: 4
-    activation: Tanh
+    activation: ReLU
 
   priorNet:
     hiddenSize: 1024
     numLayers: 2
-    activation: Tanh
+    activation: ReLU
     uniformMix: 0.01
 
   posteriorNet:
     hiddenSize: 1024
     numLayers: 2
-    activation: Tanh
+    activation: ReLU
     uniformMix: 0.01
 
   reward:
     hiddenSize: 1024
     numLayers: 2
-    activation: Tanh
+    activation: ReLU
 
   continuation:
     hiddenSize: 1024
     numLayers: 3
-    activation: Tanh
+    activation: ReLU
 
   actor:
     hiddenSize: 400
     numLayers: 2
-    activation: Tanh
+    activation: ReLU
 
   critic:
     hiddenSize: 400
     numLayers: 3
-    activation: Tanh
+    activation: ReLU
 
   minecraft:
     fov: 90
