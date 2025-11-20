@@ -6,7 +6,7 @@ gradientSteps: 60000
 envStepsPerTrainingStep: 16 #batchSize*batchLength/ number
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
-checkpointInterval: 3000
+checkpointInterval: 1000
 resume: False
 checkpointToLoad: 4k
 #
