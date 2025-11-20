@@ -1,3 +1,4 @@
+import math
 import time
 
 import gymnasium as gym
@@ -44,7 +45,7 @@ def run(configFile):
     for iteration in range(iterationsNum):
         mostRecentScore, steps_taken = dreamer.environmentInteraction(env, config.numInteractionEpisodes, seed=config.seed)
         steps_taken = steps_taken // config.dreamer.actionRepeat
-        training_steps = steps_taken // config.envStepsPerTrainingStep
+        training_steps = math.ceil(steps_taken / config.envStepsPerTrainingStep)
         pbar = tqdm(total=training_steps, desc=f"Training for run: {iteration}", unit="step", leave=False)
 
         for step_idx in range(training_steps):

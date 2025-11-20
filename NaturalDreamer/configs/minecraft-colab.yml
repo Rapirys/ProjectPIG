@@ -1,9 +1,9 @@
 environmentName: Minecraft
-runName: Minecraft-Training-Attempt-4
+runName: Minecraft-Training-Attempt-5
 seed: 1
 
 gradientSteps: 60000
-envStepsPerTrainingStep: 16 #batchSize*batchLength/ number
+envStepsPerTrainingStep: 8 #batchSize*batchLength/ number
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
 checkpointInterval: 1000
