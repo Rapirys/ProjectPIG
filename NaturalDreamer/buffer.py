@@ -33,7 +33,6 @@ class ReplayBuffer(object):
         self.dones[self.bufferIndex]            = done
         self.is_first[self.bufferIndex]         = is_first
         self.world_buffer.append_update(world_state, camera_position, is_first, done)
-        # self.camera_position[self.bufferIndex] = camera_position
 
         self.bufferIndex = (self.bufferIndex + 1) % self.capacity
         self.full = self.full or self.bufferIndex == 0
@@ -52,14 +51,12 @@ class ReplayBuffer(object):
         dones    = torch.as_tensor(self.dones[sampleIndex], device=self.device)
         first    = torch.as_tensor(self.is_first[sampleIndex], device=self.device)
         world_trajectories = self.world_buffer.get_trajectories(sampleIndex, self.is_first[sampleIndex].squeeze(-1).astype(bool))
-        # camera_position = self.camera_position[sampleIndex]
 
         return attridict({
                 "observations": observations,
                 "actions": actions,
                 "rewards": rewards,
                 "world_trajectories": world_trajectories,
-                # "camera_position": camera_position,
                 "dones": dones,
                 "is_first": first,
             })
