@@ -41,7 +41,9 @@ def run(configFile):
 
     dreamer.environmentInteraction(env, config.episodesBeforeStart, seed=config.seed)
 
+    iteration = 0
     while dreamer.totalGradientSteps <= config.gradientSteps:
+        iteration += 1
         mostRecentScore, steps_taken = dreamer.environmentInteraction(env, config.numInteractionEpisodes, seed=config.seed)
         steps_taken = steps_taken // config.dreamer.actionRepeat
         training_steps = math.ceil(steps_taken / config.envStepsPerTrainingStep)
