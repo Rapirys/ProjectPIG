@@ -18,149 +18,116 @@
 // --------------------------------------------------------------------------------------------------
 package com.microsoft.Malmo.MissionHandlers;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 import com.microsoft.Malmo.MissionHandlerInterfaces.IWorldDecorator;
 import com.microsoft.Malmo.Schemas.MissionInit;
 import com.microsoft.Malmo.Schemas.NavigationDecorator;
 import com.microsoft.Malmo.Utils.MinecraftTypeHelper;
-import com.microsoft.Malmo.Utils.PositionHelper;
 import com.microsoft.Malmo.Utils.SeedHelper;
-
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
-import net.minecraft.world.chunk.Chunk;
 
-/**
- * Creates a decorator that sets a random block and then points all compasses
- * towards the block.
- *
- * @author Cayden Codel, Carnegie Mellon University
- *
- */
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 public class NavigationDecoratorImplementation extends HandlerBase implements IWorldDecorator {
 
-	private NavigationDecorator nparams;
+    private static final int BOUNDARY_SIZE = 64;     // worldborder size (square)
+    private static final int HALF = BOUNDARY_SIZE / 2;
 
-	private double originX, originY, originZ;
-	private double placementX, placementY, placementZ;
-	private double radius;
-	private double minDist, maxDist;
-	private double minRad, maxRad;
+    private NavigationDecorator nparams;
 
-	@Override
-	public boolean parseParameters(Object params) {
-		if (params == null || !(params instanceof NavigationDecorator))
-			return false;
-		this.nparams = (NavigationDecorator) params;
-		return true;
-	}
+    // Chosen positions
+    private double originX, originY, originZ;
+    private double targetX, targetY, targetZ;
+    private boolean compassTargetSet = false;
+
+    @Override
+    public boolean parseParameters(Object params) {
+        if (params == null || !(params instanceof NavigationDecorator))
+            return false;
+        this.nparams = (NavigationDecorator) params;
+        return true;
+    }
+
+    //EntityPlayerSP['Agent1'/632, l='MpServer', x=-37.50, y=67.00, z=97.50]
+    //-17.505962044299253, 82.7790571232187
+
+    @Override
+    public void buildOnWorld(MissionInit missionInit, World world) throws DecoratorException {
+        // --- Preserve original spawn as origin ---
+        BlockPos originalSpawn = world.getSpawnPoint();
+        originX = originalSpawn.getX();
+        originY = originalSpawn.getY();
+        originZ = originalSpawn.getZ();
+
+        // --- Random border center, but keep original spawn inside the 100x100 square ---
+        // Spawn must satisfy: |spawn - center| < HALF
+        double offX = (SeedHelper.getRandom().nextDouble() * 2 - 1) * (HALF - 1);
+        double offZ = (SeedHelper.getRandom().nextDouble() * 2 - 1) * (HALF - 1);
+        double centerX = originX + offX;
+        double centerZ = originZ + offZ;
 
 
-	@Override
-	public void buildOnWorld(MissionInit missionInit, World world) throws DecoratorException {
-		if (nparams.getRandomPlacementProperties().getOrigin() != null)
-			originX = nparams.getRandomPlacementProperties().getOrigin().getX().doubleValue();
-		else
-			originX = world.getSpawnPoint().getX();
-		if (nparams.getRandomPlacementProperties().getOrigin() != null)
-			originY = nparams.getRandomPlacementProperties().getOrigin().getY().doubleValue();
-		else
-			originY = world.getSpawnPoint().getY();
-		if (nparams.getRandomPlacementProperties().getOrigin() != null)
-			originZ = nparams.getRandomPlacementProperties().getOrigin().getZ().doubleValue();
-		else
-			originZ = world.getSpawnPoint().getZ();
+        MinecraftServer server = world.getMinecraftServer();
+        server.getCommandManager().executeCommand(server,
+                "worldborder center " + (centerX + 0.5) + " " + (centerZ + 0.5));
+        server.getCommandManager().executeCommand(server,
+                "worldborder set " + BOUNDARY_SIZE);
 
-		maxRad = nparams.getRandomPlacementProperties().getMaxRandomizedRadius().doubleValue();
-		minRad = nparams.getRandomPlacementProperties().getMinRandomizedRadius().doubleValue();
-		radius = (int) (SeedHelper.getRandom().nextDouble() * (maxRad - minRad) + minRad);
+//        WorldBorder border = world.getWorldBorder();
+//        border.setSize(BOUNDARY_SIZE);
+//        border.setCenter(centerX + 0.5, centerZ + 0.5);
+//
+//        SPacketWorldBorder init = new SPacketWorldBorder(border, SPacketWorldBorder.Action.INITIALIZE);
+//        for (EntityPlayerMP p : world.getPlayers(EntityPlayerMP.class, Predicates.alwaysTrue())) {
+//            p.connection.sendPacket(init);
+//        }
 
-		minDist = nparams.getMinRandomizedDistance().doubleValue();
-		maxDist = nparams.getMaxRandomizedDistance().doubleValue();
-		placementX = 0;
-		placementY = 0;
-		placementZ = 0;
-		if (nparams.getRandomPlacementProperties().getPlacement().equals("surface")) {
-			placementX = ((SeedHelper.getRandom().nextDouble() - 0.5) * 2 * radius);
-			placementZ = (SeedHelper.getRandom().nextDouble() > 0.5 ? -1 : 1) * Math.sqrt((radius * radius) - (placementX * placementX));
-			// Change center to origin now
-			placementX += originX;
-			placementZ += originZ;
-			placementY = PositionHelper.getTopSolidOrLiquidBlock(world, new BlockPos(placementX, 0, placementZ)).getY() - 1;
-		} else if (nparams.getRandomPlacementProperties().getPlacement().equals("fixed_surface")) {
-			placementX = ((0.42 - 0.5) * 2 * radius);
-			placementZ = (0.24 > 0.5 ? -1 : 1) * Math.sqrt((radius * radius) - (placementX * placementX));
-			// Change center to origin now
-			placementX += originX;
-			placementZ += originZ;
-			placementY = PositionHelper.getTopSolidOrLiquidBlock(world, new BlockPos(placementX, 0, placementZ)).getY() - 1;
-		} else if (nparams.getRandomPlacementProperties().getPlacement().equals("circle")) {
-			placementX = ((SeedHelper.getRandom().nextDouble() - 0.5) * 2 * radius);
-			placementY = originY;
-			placementZ = (SeedHelper.getRandom().nextDouble() > 0.5 ? -1 : 1) * Math.sqrt((radius * radius) - (placementX * placementX));
-			// Change center to origin now
-			placementX += originX;
-			placementZ += originZ;
-		} else {
-			placementX = ((SeedHelper.getRandom().nextDouble() - 0.5) * 2 * radius);
-			placementY = (SeedHelper.getRandom().nextDouble() - 0.5) * 2 * Math.sqrt((radius * radius) - (placementX * placementX));
-			placementZ = (SeedHelper.getRandom().nextDouble() > 0.5 ? -1 : 1)
-					* Math.sqrt((radius * radius) - (placementX * placementX) - (placementY * placementY));
-			// Change center to origin now
-			placementX += originX;
-			placementY += originY;
-			placementZ += originZ;
-		}
-		IBlockState state = MinecraftTypeHelper
-				.ParseBlockType(nparams.getRandomPlacementProperties().getBlock().value());
-		world.setBlockState(new BlockPos(placementX, placementY, placementZ), state);
-		// Set compass location to the block
-		double xDel = 0, zDel = 0;
-		if (nparams.isRandomizeCompassLocation()) {
-			double dist = 0;
-			do {
-				xDel = (SeedHelper.getRandom().nextDouble() - 0.5) * 2 * maxDist;
-				zDel = (SeedHelper.getRandom().nextDouble() - 0.5) * 2 * maxDist;
-				dist = Math.sqrt(xDel * xDel + zDel * zDel);
-			} while (dist <= maxDist && dist >= minDist);
-		}
-		placementX += xDel;
-		placementZ += zDel;
-	}
 
-	@Override
-	public boolean getExtraAgentHandlersAndData(List<Object> handlers, Map<String, String> data) {
-		return false;
-	}
+        // 4) Pick target position in boundary (not equal to player’s boundary cell)
+        int minX = (int)Math.floor(centerX) - HALF + 1;
+        int maxX = (int)Math.floor(centerX) + HALF - 1;
+        int minZ = (int)Math.floor(centerZ) - HALF + 1;
+        int maxZ = (int)Math.floor(centerZ) + HALF - 1;
 
-	@Override
-	public void update(World world) {
-		if (Minecraft.getMinecraft().player != null) {
-			BlockPos spawn = Minecraft.getMinecraft().player.world.getSpawnPoint();
-			if (spawn.getX() != (int) placementX && spawn.getY() != (int) placementY
-					&& spawn.getZ() != (int) placementZ)
-				Minecraft.getMinecraft().player.world.setSpawnPoint(new BlockPos(placementX, placementY, placementZ));
-		}
-	}
+        int tx = minX + SeedHelper.getRandom().nextInt(Math.max(1, maxX - minX + 1));
+        int tz = minZ + SeedHelper.getRandom().nextInt(Math.max(1, maxZ - minZ + 1));
+        targetX = tx; targetZ = tz; targetY = 0;
 
-	@Override
-	public void prepare(MissionInit missionInit) {
-	}
+        // Block to place (default diamond_block if unspecified)
+        String blockName = "diamond_block";
+        IBlockState state = MinecraftTypeHelper.ParseBlockType(blockName); //TODO will compas point to target
 
-	@Override
-	public void cleanup() {
-	}
+        // 5) Build 3x3x(world_height) column centered at target
+        int maxY = world.getActualHeight(); // full vertical build height
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                for (int y = 0; y < maxY; y++) {
+                    world.setBlockState(new BlockPos((int)targetX + dx, y, (int)targetZ + dz), state, 2);
+                }
+            }
+        }
+    }
 
-	@Override
-	public boolean targetedUpdate(String nextAgentName) {
-		return false;
-	}
+    @Override
+    public boolean getExtraAgentHandlersAndData(List<Object> handlers, Map<String, String> data) {
+        return false;
+    }
 
-	@Override
-	public void getTurnParticipants(ArrayList<String> participants, ArrayList<Integer> participantSlots) {
-	}
+    @Override
+    public void update(World world) {
+        if (!compassTargetSet && Minecraft.getMinecraft().player != null) {
+            world.setSpawnPoint(new BlockPos((int)targetX, 0, (int)targetZ));
+            compassTargetSet = true;
+        }
+    }
+    @Override public void prepare(MissionInit missionInit) {
+    }
+    @Override public void cleanup() { }
+    @Override public boolean targetedUpdate(String nextAgentName) { return false; }
+    @Override public void getTurnParticipants(ArrayList<String> participants, ArrayList<Integer> participantSlots) { }
 }

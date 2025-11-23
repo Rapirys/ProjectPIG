@@ -17,7 +17,6 @@ def getEnvProperties(env):
     # Read hybrid meta if present; otherwise assume all continuous.
     cont_dim = getattr(env.action_space, "_cont_dim", env.action_space.shape[0])
     disc_segments = getattr(env.action_space, "_disc_segments", [])
-    disc_n = sum(disc_segments) #TODO disc_n is not used
 
     low  = env.action_space.low.reshape(-1).tolist()
     high = env.action_space.high.reshape(-1).tolist()
@@ -164,7 +163,7 @@ def make_env(config):
         eval_base = gym.make(environment_name, render_mode="rgb_array")
 
     if environment_name in {"Minecraft"}:
-        xml = Path("../Malmo/MalmoEnv/missions/findthegoal.xml").read_text() #findthegoal.xml
+        xml = Path("../Malmo/MalmoEnv/missions/findthegoalexteme.xml").read_text() #findthegoal.xml
         base = malmoenv.make()
         base.init(
             xml,
@@ -175,13 +174,10 @@ def make_env(config):
             role=0,
             exp_uid="test1",
             episode=0,
+            action_filter = {},
             resync=0, reshape=True, )
 
-        base = TransformAction(
-            MalmoAdapter(base),
-            func=lambda a: a["actions"],
-            action_space=spaces.Dict({"actions": base.action_space}),
-        )
+        base = MalmoAdapter(base)
         base = MinecraftWrapper(FlatDictActionSpace(base))
         eval_base = base
 

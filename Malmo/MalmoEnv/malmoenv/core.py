@@ -41,17 +41,25 @@ class StringActionSpace(gymnasium.spaces.Discrete):
         return action
 
 
-class ActionSpace(gymnasium.spaces.Discrete):
+class ActionSpace(gymnasium.spaces.Dict):
     """Malmo actions as gym action space"""
     def __init__(self, actions):
-        self.actions = actions
-        gymnasium.spaces.Discrete.__init__(self, len(self.actions))
+        self.actions = actions  # keep mapping verb -> list of concrete command strings
+
+        spaces = {}
+        for name, cmd_list in actions.items():
+            spaces[name] = gymnasium.spaces.Discrete(len(cmd_list))
+
+        super().__init__(spaces)
 
     def sample(self):
-        return random.randint(1, len(self.actions)) - 1
+        return {
+            name: np.random.randint(0, len(cmd_list), dtype=np.int32)
+            for name, cmd_list in self.actions.items()
+        }
 
     def __getitem__(self, action):
-        return self.actions[action]
+        return "\n".join(self.actions[name][int(idx)] for name, idx in action.items())
 
     def __len__(self):
         return len(self.actions)

@@ -7,8 +7,8 @@ envStepsPerTrainingStep: 4 #batchSize*batchLength/ number
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
 checkpointInterval: 1000
-resume: True
-checkpointToLoad: 2k
+resume: False
+checkpointToLoad: 9k
 #
 episodesBeforeStart: 1
 numInteractionEpisodes: 1

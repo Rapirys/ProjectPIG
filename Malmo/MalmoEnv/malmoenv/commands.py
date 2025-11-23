@@ -55,7 +55,7 @@ class CommandParser:
     all_nearbycraft = ["nearbyCraft"]
     all_nearbysmelt = ["nearbySmelt"]
     all_mission_quit = ["quit"]
-    all_human_level = ["forward", "left", "right", "jump", "sneak", "sprint", "inventory",
+    all_human_level = ["forward", "left", "right", "jump", "sneak", "sprint", # "inventory",
                        "swapHands", "drop", "use", "attack", "moveMouse",
                        "hotbar.1", "hotbar.2", "hotbar.3", "hotbar.4", "hotbar.5",
                        "hotbar.6", "hotbar.7", "hotbar.8", "hotbar.9"]
@@ -88,62 +88,70 @@ class CommandParser:
 
     def get_actions(self, commands):
         """Get parameterized actions from command list based on command type and verb."""
-        actions = []
+        actions = {}
         for type, turn_based, verb in commands:
             if len(self.action_filter) != 0 and verb not in self.action_filter:
                 continue
-            if type == 'DiscreteMovement':
-                if verb in {"move", "turn", "look",
-                            "strafe", "jumpmove", "jumpstrafe"}:
-                    actions.append(verb + " 1")
-                    actions.append(verb + " -1")
-                elif verb in {"jumpeast", "jumpnorth", "jumpsouth",
-                              "jumpwest", "movenorth", "moveeast",
-                              "movesouth", "movewest", "jumpuse",
-                              "use", "attack", "jump"}:
-                    actions.append(verb + " 1")
-                else:
-                    raise CommandHandlerException("Invalid discrete command")
-            elif type == 'ContinuousMovement':
-                #  Translate to discrete.
-                if verb in {"move", "strafe", "pitch", "turn"}:
-                    actions.append(verb + " 1")
-                    actions.append(verb + " -1")
-                elif verb in {"crouch", "jump", "attack", "use"}:
-                    actions.append(verb + " 1")
-                    actions.append(verb + " 0")
-                else:
-                    raise CommandHandlerException("Invalid continuous command")
-            elif type == 'HumanLevel':
+            # if type == 'DiscreteMovement':
+            #     if verb in {"move", "turn", "look",
+            #                 "strafe", "jumpmove", "jumpstrafe"}:
+            #         actions.append(verb + " 1")
+            #         actions.append(verb + " -1")
+            #     elif verb in {"jumpeast", "jumpnorth", "jumpsouth",
+            #                   "jumpwest", "movenorth", "moveeast",
+            #                   "movesouth", "movewest", "jumpuse",
+            #                   "use", "attack", "jump"}:
+            #         actions.append(verb + " 1")
+            #     else:
+            #         raise CommandHandlerException("Invalid discrete command")
+            # elif type == 'ContinuousMovement':
+            #     #  Translate to discrete.
+            #     if verb in {"move", "strafe", "pitch", "turn"}:
+            #         actions.append(verb + " 1")
+            #         actions.append(verb + " -1")
+            #     elif verb in {"crouch", "jump", "attack", "use"}:
+            #         actions.append(verb + " 1")
+            #         actions.append(verb + " 0")
+            #     else:
+            #         raise CommandHandlerException("Invalid continuous command")
+            if type == 'HumanLevel':
                 if verb == 'moveMouse':
-                    actions.append('mouseMove 0 0')
-                elif verb in {'forward', 'back', 'left', 'right'}:
-                    actions.append(verb + ' 1')
-                    actions.append(verb + ' 0')
+                    actions["moveMouse"] = [
+                        # "moveMouse 0 0",
+                        "moveMouse 100 0"
+                        "moveMouse -100 0",
+                        "moveMouse 0 100",
+                        "moveMouse 0 -100",
+                        "moveMouse 70 70"
+                        "moveMouse -70 70",
+                        "moveMouse 70 -70",
+                        "moveMouse -70 -70",
+                    ]
+
                 else:
-                    actions.append(verb)
-            elif type == 'MissionQuit':
-                if verb != 'quit':
-                    raise CommandHandlerException("Invalid quit command")
-                actions.append(verb)
-            elif type == 'Chat':
-                if verb != 'chat':
-                    raise CommandHandlerException("Invalid chat command")
-                actions.append(verb)
-            elif type == 'NearbyCraft':
-                if verb != 'nearbyCraft':
-                    raise CommandHandlerException("Invalid nearby craft command")
-                actions.append(verb)
-            elif type == 'NearbySmelt':
-                if verb != 'nearbySmelt':
-                    raise CommandHandlerException("Invalid nearby smelt command")
-                actions.append(verb)
-            elif type == 'SimpleCraft':
-                if verb != 'craft':
-                    raise CommandHandlerException("Invalid craft command")
-                actions.append(verb)
-            elif type == 'AbsoluteMovement' or 'Inventory':
-                actions.append(verb)
+                    actions[verb] = [verb + " 0", verb + " 1"]
+            # elif type == 'MissionQuit':
+            #     if verb != 'quit':
+            #         raise CommandHandlerException("Invalid quit command")
+            #     actions.append(verb)
+            # elif type == 'Chat':
+            #     if verb != 'chat':
+            #         raise CommandHandlerException("Invalid chat command")
+            #     actions.append(verb)
+            # elif type == 'NearbyCraft':
+            #     if verb != 'nearbyCraft':
+            #         raise CommandHandlerException("Invalid nearby craft command")
+            #     actions.append(verb)
+            # elif type == 'NearbySmelt':
+            #     if verb != 'nearbySmelt':
+            #         raise CommandHandlerException("Invalid nearby smelt command")
+            #     actions.append(verb)
+            # elif type == 'SimpleCraft':
+            #     if verb != 'craft':
+            #         raise CommandHandlerException("Invalid craft command")
+            #     actions.append(verb)
+            # elif type == 'AbsoluteMovement' or 'Inventory':
+            #     actions.append(verb)
         return actions
 
     def _command_hander(self, handlers, turnbased, commands):

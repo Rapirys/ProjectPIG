@@ -1183,44 +1183,6 @@
             </xs:documentation>
         </xs:annotation>
         <xs:complexType>
-            <xs:all>
-                <xs:element name="randomPlacementProperties" type="RandomPlacement">
-                    <xs:annotation>
-                        <xs:documentation>
-                            Properties for placing a block in the world randomly.
-                        </xs:documentation>
-                    </xs:annotation>
-                </xs:element>
-                <xs:element name="randomizeCompassLocation" type="xs:boolean" minOccurs="1" maxOccurs="1">
-                    <xs:annotation>
-                        <xs:documentation>
-                            Sets whether or not the compass location should be randomized within a certain radius.
-                            If false, will set the compass location to the block that was randomly placed.
-                            If true, will set the compass location to a random spot within the radius specified below.
-                        </xs:documentation>
-                    </xs:annotation>
-                </xs:element>
-                <xs:element name="minRandomizedDistance" type="xs:decimal" minOccurs="0" maxOccurs="1" default="0">
-                    <xs:annotation>
-                        <xs:documentation>
-                            The minimum distance a randomized compass location must be from the block that was randomly
-                            placed.
-
-                            If omitted, set to 0 blocks.
-                        </xs:documentation>
-                    </xs:annotation>
-                </xs:element>
-                <xs:element name="maxRandomizedDistance" type="xs:decimal" minOccurs="0" maxOccurs="1" default="8">
-                    <xs:annotation>
-                        <xs:documentation>
-                            The maximum distance a randomized compass location must be from the block that was randomly
-                            placed.
-
-                            If omitted, set to 8 blocks.
-                        </xs:documentation>
-                    </xs:annotation>
-                </xs:element>
-            </xs:all>
         </xs:complexType>
     </xs:element>
 
