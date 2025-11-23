@@ -34,7 +34,7 @@ dreamer:
   worldModelLR: 0.0006
   gradientNormType: 2
   gradientClip: 100
-  reconstructionLossCoefficient: 10
+  reconstructionLossCoefficient: 1000
 
   discount: 0.997
   lambda_: 0.95
