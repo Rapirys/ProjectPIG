@@ -37,6 +37,7 @@
                 <InventoryObject slot="1" type="stone" quantity="64"  metadata="0"/>
                 <!-- 1 speed potion -->
 <!--                <InventoryObject slot="2" type="splash_potion" quantity="1" metadata="0"/>-->
+                <InventoryObject slot="8" type="compass" quantity="1" metadata="0"/>
             </Inventory>
         </AgentStart>
         <AgentHandlers>

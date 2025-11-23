@@ -237,6 +237,9 @@ class Dreamer:
                                seed=None, evaluation=False, saveVideo=False, filename="videos/unnamedVideo", fps=30, macroBlockSize=16):
         action_repeat = self.config.actionRepeat
         scores = []
+        if numEpisodes == 0:
+            return 0,0
+
         for i in range(numEpisodes):
             recurrentState = torch.zeros(1, self.recurrentSize, device=self.device)
             latentState    = torch.zeros(1, self.latentSize,    device=self.device)

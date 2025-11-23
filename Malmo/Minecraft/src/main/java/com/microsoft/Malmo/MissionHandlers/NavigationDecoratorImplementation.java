@@ -22,6 +22,7 @@ import com.microsoft.Malmo.MissionHandlerInterfaces.IWorldDecorator;
 import com.microsoft.Malmo.Schemas.MissionInit;
 import com.microsoft.Malmo.Schemas.NavigationDecorator;
 import com.microsoft.Malmo.Utils.MinecraftTypeHelper;
+import com.microsoft.Malmo.Utils.PositionHelper;
 import com.microsoft.Malmo.Utils.SeedHelper;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
@@ -78,21 +79,10 @@ public class NavigationDecoratorImplementation extends HandlerBase implements IW
         server.getCommandManager().executeCommand(server,
                 "worldborder set " + BOUNDARY_SIZE);
 
-//        WorldBorder border = world.getWorldBorder();
-//        border.setSize(BOUNDARY_SIZE);
-//        border.setCenter(centerX + 0.5, centerZ + 0.5);
-//
-//        SPacketWorldBorder init = new SPacketWorldBorder(border, SPacketWorldBorder.Action.INITIALIZE);
-//        for (EntityPlayerMP p : world.getPlayers(EntityPlayerMP.class, Predicates.alwaysTrue())) {
-//            p.connection.sendPacket(init);
-//        }
-
-
-        // 4) Pick target position in boundary (not equal to player’s boundary cell)
-        int minX = (int)Math.floor(centerX) - HALF + 1;
-        int maxX = (int)Math.floor(centerX) + HALF - 1;
-        int minZ = (int)Math.floor(centerZ) - HALF + 1;
-        int maxZ = (int)Math.floor(centerZ) + HALF - 1;
+        int minX = (int)Math.floor(centerX) - HALF + 2;
+        int maxX = (int)Math.floor(centerX) + HALF - 2;
+        int minZ = (int)Math.floor(centerZ) - HALF + 2;
+        int maxZ = (int)Math.floor(centerZ) + HALF - 2;
 
         int tx = minX + SeedHelper.getRandom().nextInt(Math.max(1, maxX - minX + 1));
         int tz = minZ + SeedHelper.getRandom().nextInt(Math.max(1, maxZ - minZ + 1));
@@ -100,7 +90,7 @@ public class NavigationDecoratorImplementation extends HandlerBase implements IW
 
         // Block to place (default diamond_block if unspecified)
         String blockName = "diamond_block";
-        IBlockState state = MinecraftTypeHelper.ParseBlockType(blockName); //TODO will compas point to target
+        IBlockState state = MinecraftTypeHelper.ParseBlockType(blockName);
 
         // 5) Build 3x3x(world_height) column centered at target
         int maxY = world.getActualHeight(); // full vertical build height
@@ -121,8 +111,12 @@ public class NavigationDecoratorImplementation extends HandlerBase implements IW
     @Override
     public void update(World world) {
         if (!compassTargetSet && Minecraft.getMinecraft().player != null) {
-            world.setSpawnPoint(new BlockPos((int)targetX, 0, (int)targetZ));
+            int y = PositionHelper.getTopSolidOrLiquidBlock(world, new BlockPos((int)targetX, 0, (int)targetZ)).getY();
+            String cmd = String.format("setworldspawn %d %d %d", (int)targetX, y, (int)targetZ);
+            MinecraftServer server = world.getMinecraftServer();
+            server.getCommandManager().executeCommand(server, cmd);
             compassTargetSet = true;
+
         }
     }
     @Override public void prepare(MissionInit missionInit) {
