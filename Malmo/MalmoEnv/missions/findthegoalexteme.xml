@@ -69,7 +69,7 @@
             </AgentQuitFromTouchingBlockType>
             <RewardForMissionEnd rewardForDeath="-1">
                 <Reward description="found_goal" reward="0.5"/>
-                <Reward description="out_of_time" reward="-0.1"/>
+<!--                <Reward description="out_of_time" reward="-0.1"/>-->
             </RewardForMissionEnd>
         </AgentHandlers>
     </AgentSection>

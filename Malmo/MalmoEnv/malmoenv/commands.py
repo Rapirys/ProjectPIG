@@ -55,10 +55,9 @@ class CommandParser:
     all_nearbycraft = ["nearbyCraft"]
     all_nearbysmelt = ["nearbySmelt"]
     all_mission_quit = ["quit"]
-    all_human_level = ["forward", "left", "right", "jump", "sneak", "sprint", # "inventory",
-                       "swapHands", "drop", "use", "attack", "moveMouse",
-                       "hotbar.1", "hotbar.2", "hotbar.3", "hotbar.4", "hotbar.5",
-                       "hotbar.6", "hotbar.7", "hotbar.8", "hotbar.9"]
+    all_human_level = ["forward", "back", "left", "right", "jump", "sneak", "sprint", # "inventory",
+                       "swapHands", "use", "attack", "moveMouse", "drop",
+                       "hotbar"]
 
     def __init__(self, action_filter=None):
         if action_filter is None:
@@ -117,17 +116,18 @@ class CommandParser:
             if type == 'HumanLevel':
                 if verb == 'moveMouse':
                     actions["moveMouse"] = [
-                        # "moveMouse 0 0",
-                        "moveMouse 100 0"
+                        "moveMouse 0 0",
+                        "moveMouse 100 0",
                         "moveMouse -100 0",
-                        "moveMouse 0 100",
-                        "moveMouse 0 -100",
-                        "moveMouse 70 70"
-                        "moveMouse -70 70",
-                        "moveMouse 70 -70",
-                        "moveMouse -70 -70",
+                        "moveMouse 0 50",
+                        "moveMouse 0 -50",
+                        "moveMouse 70 35",
+                        "moveMouse -70 35",
+                        "moveMouse 70 -35",
+                        "moveMouse -70 -35",
                     ]
-
+                elif verb == "hotbar":
+                    actions["hotbar"] = [f"hotbar.{i} 1" for i in range(1, 10)]
                 else:
                     actions[verb] = [verb + " 0", verb + " 1"]
             # elif type == 'MissionQuit':
