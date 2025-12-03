@@ -21,7 +21,6 @@
             <DefaultWorldGenerator forceReset="true"/>
             <NavigationDecorator/>
 
-            <ServerQuitFromTimeUp timeLimitMs="60000" description="out_of_time"/>
             <ServerQuitWhenAnyAgentFinishes/>
         </ServerHandlers>
     </ServerSection>
@@ -67,6 +66,10 @@
             <AgentQuitFromTouchingBlockType>
                 <Block type="diamond_block" description="found_goal"/>
             </AgentQuitFromTouchingBlockType>
+            <AgentQuitFromReachingCommandQuota description="step_limit">
+                <Quota commands="forward" quota="200"/>
+            </AgentQuitFromReachingCommandQuota>
+
             <RewardForMissionEnd rewardForDeath="-1">
                 <Reward description="found_goal" reward="0.5"/>
 <!--                <Reward description="out_of_time" reward="-0.1"/>-->
