@@ -107,7 +107,7 @@ class FlatDictActionSpace(gym.ActionWrapper):
             self._validate_one_hot_index(segment, idx, key)
             out[key] = idx
             pos += sp.n
-        return out
+        return {'forward': 1, 'jump': 1, 'sprint': 1, 'hotbar': 0, 'use': 1}
 
 
 
