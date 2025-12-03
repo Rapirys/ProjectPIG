@@ -144,8 +144,8 @@ class Dreamer:
 
 
         reconstructionMeans = self.decoder(fullStates.view(-1, self.fullStateSize)).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
-        reconstructionMeans = symlog(reconstructionMeans)
-        reconstructionLoss = -Normal(reconstructionMeans, 1.0).log_prob(symlog(data.observations[:, 1:])).mean()
+        reconstructionMeans = reconstructionMeans
+        reconstructionLoss = -Normal(reconstructionMeans, 1.0).log_prob(data.observations[:, 1:]).mean()
 
         # rewardDistribution  =  self.rewardPredictor(fullStates)
         # rewardLoss          = -rewardDistribution.log_prob(data.rewards[:, 1:].squeeze(-1)).mean()
