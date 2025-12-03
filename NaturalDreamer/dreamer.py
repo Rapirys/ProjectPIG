@@ -137,9 +137,9 @@ class Dreamer:
                 reconstruction3DLoss = reconstruction3DLoss + (full_state_step * ssc_gradients).sum()
 
         recurrentStates             = torch.stack(recurrentStates,              dim=1) # (batchSize, batchLength-1, recurrentSize)
-        priorsLogits                = torch.stack(priorsLogits,                 dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
+        # priorsLogits                = torch.stack(priorsLogits,                 dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
         posteriors                  = torch.stack(posteriors,                   dim=1) # (batchSize, batchLength-1, latentLength*latentClasses)
-        posteriorsLogits            = torch.stack(posteriorsLogits,             dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
+        # posteriorsLogits            = torch.stack(posteriorsLogits,             dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
         fullStates                  = torch.cat((recurrentStates, posteriors), dim=-1) # (batchSize, batchLength-1, recurrentSize + latentLength*latentClasses)
 
 
@@ -147,25 +147,25 @@ class Dreamer:
         reconstructionMeans = symlog(reconstructionMeans)
         reconstructionLoss = -Normal(reconstructionMeans, 1.0).log_prob(symlog(data.observations[:, 1:])).mean()
 
-        rewardDistribution  =  self.rewardPredictor(fullStates)
-        rewardLoss          = -rewardDistribution.log_prob(data.rewards[:, 1:].squeeze(-1)).mean()
+        # rewardDistribution  =  self.rewardPredictor(fullStates)
+        # rewardLoss          = -rewardDistribution.log_prob(data.rewards[:, 1:].squeeze(-1)).mean()
 
-        priorDistribution       = Independent(OneHotCategoricalStraightThrough(logits=priorsLogits              ), 1)
-        priorDistributionSG     = Independent(OneHotCategoricalStraightThrough(logits=priorsLogits.detach()     ), 1)
-        posteriorDistribution   = Independent(OneHotCategoricalStraightThrough(logits=posteriorsLogits          ), 1)
-        posteriorDistributionSG = Independent(OneHotCategoricalStraightThrough(logits=posteriorsLogits.detach() ), 1)
+        # priorDistribution       = Independent(OneHotCategoricalStraightThrough(logits=priorsLogits              ), 1)
+        # priorDistributionSG     = Independent(OneHotCategoricalStraightThrough(logits=priorsLogits.detach()     ), 1)
+        # posteriorDistribution   = Independent(OneHotCategoricalStraightThrough(logits=posteriorsLogits          ), 1)
+        # posteriorDistributionSG = Independent(OneHotCategoricalStraightThrough(logits=posteriorsLogits.detach() ), 1)
 
-        priorLoss       = kl_divergence(posteriorDistributionSG, priorDistribution  )
-        posteriorLoss   = kl_divergence(posteriorDistribution  , priorDistributionSG)
-        freeNats        = torch.full_like(priorLoss, self.config.freeNats)
+        # priorLoss       = kl_divergence(posteriorDistributionSG, priorDistribution  )
+        # posteriorLoss   = kl_divergence(posteriorDistribution  , priorDistributionSG)
+        # freeNats        = torch.full_like(priorLoss, self.config.freeNats)
 
-        priorLoss       = self.config.betaPrior*torch.maximum(priorLoss, freeNats)
-        posteriorLoss   = self.config.betaPosterior*torch.maximum(posteriorLoss, freeNats)
-        klLoss          = (priorLoss + posteriorLoss).mean()
-        reconstruction3DLoss = reconstruction3DLoss / (self.config.batchLength - 1)
-        reconstruction3D_CE = reconstruction3D_CE / (self.config.batchLength - 1)
+        # priorLoss       = self.config.betaPrior*torch.maximum(priorLoss, freeNats)
+        # posteriorLoss   = self.config.betaPosterior*torch.maximum(posteriorLoss, freeNats)
+        # klLoss          = (priorLoss + posteriorLoss).mean()
+        # reconstruction3DLoss = reconstruction3DLoss / (self.config.batchLength - 1)
+        # reconstruction3D_CE = reconstruction3D_CE / (self.config.batchLength - 1)
 
-        worldModelLoss =  self.config.reconstructionLossCoefficient * reconstructionLoss + rewardLoss + klLoss + reconstruction3DLoss # I think that the reconstruction loss is relatively a bit too high (11k)
+        worldModelLoss =  self.config.reconstructionLossCoefficient * reconstructionLoss # I think that the reconstruction loss is relatively a bit too high (11k)
 
         self.worldModelOptimizer.zero_grad()
         #TODO Add loss masking
@@ -176,10 +176,11 @@ class Dreamer:
         klLossShiftForGraphing = (self.config.betaPrior + self.config.betaPosterior)*self.config.freeNats
         metrics = {
             "worldModelLoss"        : worldModelLoss.item() - klLossShiftForGraphing,
-            "reconstructionLoss"    : reconstructionLoss.item(),
-            "reconstruction3DLoss"  :  reconstruction3D_CE.item() if enable3dLoss else 0,
-            "rewardPredictorLoss"   : rewardLoss.item(),
-            "klLoss"                : klLoss.item() - klLossShiftForGraphing}
+            "reconstructionLoss"    : reconstructionLoss.item()
+        }
+            # "reconstruction3DLoss"  :  reconstruction3D_CE.item() if enable3dLoss else 0,
+            # "rewardPredictorLoss"   : rewardLoss.item(),
+            # "klLoss"                : klLoss.item() - klLossShiftForGraphing}
         return fullStates.view(-1, self.fullStateSize).detach(), metrics
 
 
