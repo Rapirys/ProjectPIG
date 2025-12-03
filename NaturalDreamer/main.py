@@ -66,7 +66,7 @@ def run(configFile):
 
         if config.saveMetrics:
             metricsBase = {"envSteps": dreamer.totalEnvSteps, "gradientSteps": dreamer.totalGradientSteps, "totalReward" : mostRecentScore}
-            saveLossesToCSV(metricsFilename, metricsBase | worldModelMetrics | behaviorMetrics)
+            saveLossesToCSV(metricsFilename, metricsBase | worldModelMetrics)
             plotMetrics(f"{metricsFilename}", savePath=f"{plotFilename}", title=f"{config.environmentName}")
 
 
