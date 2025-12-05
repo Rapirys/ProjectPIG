@@ -145,6 +145,7 @@ def make_dataset(episodes, config):
 
 def make_env(config, mode, id):
     suite, task = config.task.split("_", 1)
+    #TODO Only support dmc
     if suite == "dmc":
         import envs.dmc as dmc
 

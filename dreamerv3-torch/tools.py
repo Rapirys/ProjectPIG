@@ -154,7 +154,8 @@ def simulate(
             results = [envs[i].reset() for i in indices]
             results = [r() for r in results]
             for index, result in zip(indices, results):
-                t = result.copy()
+                obs_i, info_i = result
+                t = obs_i.copy()
                 t = {k: convert(v) for k, v in t.items()}
                 # action will be added to transition in add_to_cache
                 t["reward"] = 0.0
@@ -162,10 +163,11 @@ def simulate(
                 # initial state should be added to cache
                 add_to_cache(cache, envs[index].id, t)
                 # replace obs with done by initial state
-                obs[index] = result
+                obs[index] = obs_i
+
         # step agents
-        obs = {k: np.stack([o[k] for o in obs]) for k in obs[0] if "log_" not in k}
-        action, agent_state = agent(obs, done, agent_state)
+        obs_batch = {k: np.stack([o[k] for o in obs]) for k in obs[0] if "log_" not in k}
+        action, agent_state = agent(obs_batch, done, agent_state)
         if isinstance(action, dict):
             action = [
                 {k: np.array(action[k][i].detach().cpu()) for k in action}
@@ -177,17 +179,21 @@ def simulate(
         # step envs
         results = [e.step(a) for e, a in zip(envs, action)]
         results = [r() for r in results]
-        obs, reward, done = zip(*[p[:3] for p in results])
-        obs = list(obs)
-        reward = list(reward)
-        done = np.stack(done)
+        obs_step, reward_step, terminated, truncated, _ = zip(*results)
+        obs = list(obs_step)
+        reward = list(reward_step)
+        terminated = np.stack(terminated)
+        truncated = np.stack(truncated)
+        done = terminated | truncated
+
         episode += int(done.sum())
         length += 1
         step += len(envs)
         length *= 1 - done
         # add to cache
         for a, result, env in zip(action, results, envs):
-            o, r, d, info = result
+            o, r, term, trunc, info = result
+            d = bool(term or trunc)
             o = {k: convert(v) for k, v in o.items()}
             transition = o.copy()
             if isinstance(a, dict):

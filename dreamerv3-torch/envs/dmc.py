@@ -1,8 +1,8 @@
-import gym
+import gymnasium as gym
 import numpy as np
 
 
-class DeepMindControl:
+class DeepMindControl(gym.Env):
     metadata = {}
 
     def __init__(self, name, action_repeat=1, size=(64, 64), camera=None, seed=0):
@@ -26,9 +26,11 @@ class DeepMindControl:
             camera = dict(quadruped=2).get(domain, 0)
         self._camera = camera
         self.reward_range = [-np.inf, np.inf]
+        self.observation_space = self._observation_space()
+        self.action_space = self._action_space()
 
-    @property
-    def observation_space(self):
+
+    def _observation_space(self):
         spaces = {}
         for key, value in self._env.observation_spec().items():
             if len(value.shape) == 0:
@@ -39,39 +41,44 @@ class DeepMindControl:
         spaces["image"] = gym.spaces.Box(0, 255, self._size + (3,), dtype=np.uint8)
         return gym.spaces.Dict(spaces)
 
-    @property
-    def action_space(self):
+    def _action_space(self):
         spec = self._env.action_spec()
         return gym.spaces.Box(spec.minimum, spec.maximum, dtype=np.float32)
 
     def step(self, action):
         assert np.isfinite(action).all(), action
-        reward = 0
+        reward = 0.0
+        time_step = None
         for _ in range(self._action_repeat):
             time_step = self._env.step(action)
-            reward += time_step.reward or 0
+            reward += time_step.reward or 0.0
             if time_step.last():
                 break
+
         obs = dict(time_step.observation)
         obs = {key: [val] if len(val.shape) == 0 else val for key, val in obs.items()}
         obs["image"] = self.render()
-        # There is no terminal state in DMC
         obs["is_terminal"] = False if time_step.first() else time_step.discount == 0
         obs["is_first"] = time_step.first()
-        done = time_step.last()
-        info = {"discount": np.array(time_step.discount, np.float32)}
-        return obs, reward, done, info
 
-    def reset(self):
+        terminated = bool(obs["is_terminal"])
+        truncated = False  # no time limit here; handled by TimeLimit wrapper
+
+        info = {"discount": np.array(time_step.discount, np.float32)}
+        return obs, reward, terminated, truncated, info
+
+    def reset(self, *, seed=None, options=None):
         time_step = self._env.reset()
         obs = dict(time_step.observation)
         obs = {key: [val] if len(val.shape) == 0 else val for key, val in obs.items()}
         obs["image"] = self.render()
         obs["is_terminal"] = False if time_step.first() else time_step.discount == 0
         obs["is_first"] = time_step.first()
-        return obs
+        info = {}
+        return obs, info
 
     def render(self, *args, **kwargs):
-        if kwargs.get("mode", "rgb_array") != "rgb_array":
+        mode = kwargs.get("mode", "rgb_array")
+        if mode != "rgb_array":
             raise ValueError("Only render mode 'rgb_array' is supported.")
         return self._env.physics.render(*self._size, camera_id=self._camera)
