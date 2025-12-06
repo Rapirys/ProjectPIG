@@ -194,6 +194,15 @@ def make_env(config, mode, id):
 
         env = minecraft.make_env(task, size=config.size, break_speed=config.break_speed)
         env = wrappers.OneHotAction(env)
+    elif suite == "CustomMinecraft":
+        from envs.minecraft_malmo import MalmoMinecraft
+        env = MalmoMinecraft(
+            mission_xml_path="../Malmo/MalmoEnv/missions/findthegoalexteme.xml",
+            repeat=config.action_repeat,
+            size=config.size,
+            time_limit=None,
+        )
+        env = wrappers.OneHotAction(env)
     else:
         raise NotImplementedError(suite)
     env = wrappers.TimeLimit(env, config.time_limit)

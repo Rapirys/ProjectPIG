@@ -148,7 +148,7 @@ atari100k:
 minecraft:
   task: minecraft_diamond
   step: 1e8
-  parallel: True
+  parallel: False
   envs: 16
   # no eval
   eval_episode_num: 0
@@ -177,6 +177,9 @@ memorymaze:
   task: 'memorymaze_9x9'
 
 debug:
+  eval_episode_num: 0
+  time_limit: 1000
+  actor: { layers: 5, dist: 'onehot', std: 'none' }
   debug: True
   pretrain: 1
   prefill: 1

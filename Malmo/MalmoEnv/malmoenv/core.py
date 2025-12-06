@@ -311,6 +311,7 @@ class Env:
     def _quit_episode(self):
         ok = 0
         if self.client_socket:
+                # self.step(None, quit = True)
                 comms.send_message(self.client_socket, b"<Quit/>")
                 reply = comms.recv_message(self.client_socket)  # '!I'
                 (ok,) = struct.unpack("!I", reply)
@@ -348,7 +349,7 @@ class Env:
         """Set an integer seed to send with MissionInit token on the next reset()."""
         self.seed_value = seed
 
-    def step(self, action):
+    def step(self, action, quit : bool = False):
         """gym api step (synchronous protocol)
 
         1) send <StepClient{step_options}>...actions...</StepClient...>
@@ -367,8 +368,9 @@ class Env:
             return safe_obs, 0.0, True, "{}"
 
         # Build and send StepClient message (include info; step_options==0)
+        action_command = self.action_space[action] if not quit else " quit "
         step_message = "<StepClient" + str(self.step_options) + ">" + \
-                       self.action_space[action] + \
+                        action_command +\
                        "</StepClient" + str(self.step_options) + " >"
         comms.send_message(self.client_socket, step_message.encode())
 

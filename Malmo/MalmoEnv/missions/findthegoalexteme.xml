@@ -66,6 +66,7 @@
             <AgentQuitFromReachingCommandQuota description="step_limit">
                 <Quota commands="forward" quota="800"/>
             </AgentQuitFromReachingCommandQuota>
+            <MissionQuitCommands/>
 
             <RewardForMissionEnd rewardForDeath="-1">
                 <Reward description="found_goal" reward="0.5"/>
