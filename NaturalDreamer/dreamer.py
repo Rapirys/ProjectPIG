@@ -165,7 +165,8 @@ class Dreamer:
         reconstruction3DLoss = reconstruction3DLoss / (self.config.batchLength - 1)
         reconstruction3D_CE = reconstruction3D_CE / (self.config.batchLength - 1)
 
-        worldModelLoss =  self.config.reconstructionLossCoefficient * reconstructionLoss + rewardLoss + klLoss + reconstruction3DLoss # I think that the reconstruction loss is relatively a bit too high (11k)
+        worldModelLoss =  self.config.reconstructionLossCoefficient * reconstructionLoss +\
+                          self.config.reconstruction3DLossCoefficient * reconstruction3DLoss + rewardLoss + klLoss  # I think that the reconstruction loss is relatively a bit too high (11k)
 
         self.worldModelOptimizer.zero_grad()
         #TODO Add loss masking
