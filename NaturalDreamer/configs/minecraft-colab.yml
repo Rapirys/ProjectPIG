@@ -1,5 +1,5 @@
 environmentName: Minecraft
-runName: Minecraft-Training-Attempt-10
+runName: Minecraft-Training-Attempt-11
 seed: 1
 
 gradientSteps: 60000
@@ -17,8 +17,8 @@ numEvaluationEpisodes: 1
 
 dreamer:
   actionRepeat: 1
-  batchSize: 24
-  batchLength: 24
+  batchSize: 6
+  batchLength: 32
   imaginationHorizon: 16
 
   recurrentSize: 8192 #1024*8
