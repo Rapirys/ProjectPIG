@@ -254,7 +254,7 @@ class Dreamer:
             observation, info = env.reset(seed= (seed + self.totalEpisodes if seed else None))
 
             registry = info["BlockStateRegistry"]
-            if not self.block_state_registry:
+            if registry:
                 assert len(get_classes(registry)) == self.classes
                 self.block_state_registry = registry
                 self.block_state_registry_lut = build_globalid_to_blockid_lut(self.block_state_registry, self.device)
