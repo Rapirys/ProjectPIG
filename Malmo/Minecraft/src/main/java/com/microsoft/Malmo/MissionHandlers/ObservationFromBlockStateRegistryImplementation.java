@@ -62,17 +62,20 @@ public class ObservationFromBlockStateRegistryImplementation extends HandlerBase
         // blockId -> MetaInfo map, sorted for stable output
         TreeMap<Integer, BlockMetaInfo> perBlock = new TreeMap<>();
 
-        final int total = Block.BLOCK_STATE_IDS.size(); // total number of entries
-        for (int gid = 0; gid < total; gid++) {
-            IBlockState s = Block.BLOCK_STATE_IDS.getByValue(gid);
-            if (s == null) continue; // defensive (shouldn't happen in 1.12)
+        int globalStateCount = 0;
 
-            Block b = s.getBlock();
-            int blockId = Block.getIdFromBlock(b);
-            int meta    = b.getMetaFromState(s);
+        // Enumerate all blocks in the registry
+        for (Block block : Block.REGISTRY) {
+            int blockId = Block.getIdFromBlock(block);
+            BlockMetaInfo info = perBlock.computeIfAbsent(blockId, k -> new BlockMetaInfo(block));
 
-            BlockMetaInfo info = perBlock.computeIfAbsent(blockId, k -> new BlockMetaInfo(b));
-            info.addMeta(meta, gid, s);
+            // All valid states of this block
+            for (IBlockState state : block.getBlockState().getValidStates()) {
+                int globalId = Block.getStateId(state);
+                int meta = (globalId >> 12) & 0xF;
+                info.addMeta(meta, globalId, state);
+                globalStateCount++;
+            }
         }
 
         JsonArray blocksArr = new JsonArray();
@@ -86,7 +89,10 @@ public class ObservationFromBlockStateRegistryImplementation extends HandlerBase
             bj.addProperty("meta_count", info.metaCount());
 
             JsonArray metas = new JsonArray();
-            for (Map.Entry<Integer, MetaEntry> m : info.metas.entrySet()) {
+            List<Map.Entry<Integer, MetaEntry>> metaEntries = new ArrayList<>(info.metas.entrySet());
+            metaEntries.sort(Comparator.comparingInt(Map.Entry::getKey));
+
+            for (Map.Entry<Integer, MetaEntry> m : metaEntries) {
                 JsonObject mj = new JsonObject();
                 mj.addProperty("meta", m.getKey());
                 mj.addProperty("global_id", m.getValue().globalId);
@@ -99,7 +105,7 @@ public class ObservationFromBlockStateRegistryImplementation extends HandlerBase
 
         JsonObject root = new JsonObject();
         root.addProperty("protocol", "1.12");
-        root.addProperty("global_state_count", total);
+        root.addProperty("global_state_count", globalStateCount);
         root.addProperty("block_count", perBlock.size());
         root.add("blocks", blocksArr);
         return root;
