@@ -113,10 +113,15 @@ class Dreamer:
 
 
             if enable3dLoss:
-                camera_position, grid_origin, grid = next(data.world_trajectories)
+                camera_position, grid_origin, grid_np = next(data.world_trajectories)
                 camera_position = torch.from_numpy(camera_position).to(self.device)
                 grid_origin = torch.from_numpy(grid_origin).to(self.device)
-                grid = torch.from_numpy(grid).to(self.device)
+                grid = torch.from_numpy(grid_np).to(self.device)
+
+                assert grid_np.min() >= 0, "grid contains negative global_id values"
+                assert grid_np.max() < self.block_state_registry_lut.shape[0], (
+                    f"grid contains global_id >= lut_size: max={grid_np.max()}, lut_size={self.block_state_registry_lut.shape[0]}"
+                )
                 block_id_grid = self.block_state_registry_lut[grid.long()]  # TODO Do not need this mapping in final version
                 full_state_step = torch.cat((recurrentState, posterior), dim=-1)
                 ssc_input = full_state_step.detach().requires_grad_(True)

@@ -18,7 +18,7 @@ numEvaluationEpisodes: 1
 dreamer:
   actionRepeat: 1
   batchSize: 12
-  batchLength: 32
+  batchLength: 48
   imaginationHorizon: 16
 
   recurrentSize: 8192 #1024*8
