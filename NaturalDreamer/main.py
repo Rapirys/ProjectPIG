@@ -45,6 +45,7 @@ def run(configFile):
     while dreamer.totalGradientSteps <= config.gradientSteps:
         iteration += 1
         mostRecentScore, steps_taken = dreamer.environmentInteraction(env, config.numInteractionEpisodes, seed=config.seed)
+        dreamer.prepareEnvironment(env, seed=config.seed)
         steps_taken = steps_taken // config.dreamer.actionRepeat
         training_steps = math.ceil(steps_taken / config.envStepsPerTrainingStep)
         pbar = tqdm(total=training_steps, desc=f"Training for run: {iteration}", unit="step", leave=False)
