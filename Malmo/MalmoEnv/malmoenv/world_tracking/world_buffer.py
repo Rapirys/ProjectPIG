@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from itertools import chain
 from typing import List, Dict, Tuple, Optional, Iterator
 import numpy as np
-import torch
 from malmoenv.world_tracking.utils import SectionBlob, WorldUpdate
 
 
@@ -22,19 +21,18 @@ class ActiveChunk:
         self.tick_lookup.setdefault(tick, []).append(len(self.updates) - 1)
 
 
-# ---- World buffer ------------------------------------------------------------
+    # ---- World buffer ------------------------------------------------------------
 class WorldTrajectory:
-    def __init__(self, device: torch.device) -> None:
+    def __init__(self) -> None:
         self.chunks: List[ActiveChunk] = []
         self.added: List[List[int]] = []
         self.removed: List[List[int]] = []
         self.tick_views: List[List[int]] = []
         self.current_view: Dict[Tuple[int, int], int] = {}
         self.age = -1
-        self.camera_positions: List[torch.Tensor] = []  # shape (len, 5): X,Y,Z,yaw,pitch
-        self.device = device
+        self.camera_positions: List[np.ndarray] = [] #Shape (len, 5): #X,Y,Z , yaw, pitch
 
-    @torch.no_grad()
+
     def add_update(self, world_update: WorldUpdate, camera_position: np.ndarray) -> None:
         """Append one tick of updates (loads/unloads/single-block edits)."""
         self.age += 1
@@ -70,36 +68,26 @@ class WorldTrajectory:
                 if idx is not None:
                     self.chunks[idx].append_update(tick, int(x), int(y), int(z), int(state))
 
-        # Snapshot the current view for this tick and save camera pose.
+        # 4) Snapshot the current view for this tick.
+        #    Store a shallow copy so later mutations don't affect past ticks.
         self.tick_views.append(list(self.current_view.values()))
-        cam = torch.as_tensor(camera_position, dtype=torch.float32, device=self.device)
-        self.camera_positions.append(cam)
+        self.camera_positions.append(camera_position)
 
-    @torch.no_grad()
-    def get_world_trajectory(
-        self,
-        scene_size: Tuple[float, float, float],
-        start_tick: int = 0,
-        end_tick: Optional[int] = None,
-    ) -> Iterator[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    def get_world_trajectory(self, scene_size: Tuple[float, float, float], start_tick: int = 0, end_tick: Optional[int] = None) -> Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         if end_tick is None:
             end_tick = self.age
         if start_tick < 0 or end_tick > self.age or start_tick > end_tick:
             raise IndexError(f"tick range [{start_tick}, {end_tick}] out of bounds [0, {self.age}]")
 
         sx, sy, sz = map(int, scene_size)
-        camera_positions = torch.stack(self.camera_positions[start_tick : end_tick + 1], dim=0)  # (T, 5)
-        origins = compute_vox_origin_batch_np(camera_positions.detach().cpu().numpy(), scene_size) #TODO refactor compute_vox_origin_batch_np
-        origins = torch.from_numpy(origins).to(self.device)
+        camera_positions_np = np.stack(self.camera_positions[start_tick:end_tick + 1])
+        origins = compute_vox_origin_batch_np(camera_positions_np, scene_size)
 
         chunk_view_iterator = self._get_world_trajectory(start_tick, end_tick)
-        vol = torch.zeros((sx, sy, sz), dtype=torch.long, device=self.device)
         for i, view in enumerate(chunk_view_iterator):
-            vol.zero_()
-            ox = int(origins[i, 0].item())
-            oy = int(origins[i, 1].item())
-            oz = int(origins[i, 2].item())
+            ox, oy, oz = origins[i]
             ex, ey, ez = ox + sx, oy + sy, oz + sz
+            vol = np.zeros((sx, sy, sz), dtype=np.uint16)
 
             chunk_size = 16
             for (ccx, ccz), chunk_arr in view.items():
@@ -124,12 +112,11 @@ class WorldTrajectory:
                 lz0, lz1 = z0 - base_z, z1 - base_z
                 vol[rx0:rx1, ry0:ry1, rz0:rz1] = chunk_arr[lx0:lx1, ly0:ly1, lz0:lz1]
 
-            yield camera_positions[i], origins[i], vol.clone()
+            yield camera_positions_np[i], origins[i], vol
 
-    @torch.no_grad()
-    def _get_world_trajectory(self, start_tick: int, end_tick: int) -> Iterator[Dict[Tuple[int, int], torch.Tensor]]:
-        view: Dict[Tuple[int, int], torch.Tensor] = {}
-        view_iter: Dict[Tuple[int, int], Iterator[torch.Tensor]] = {}
+    def _get_world_trajectory(self, start_tick: int, end_tick: int) -> Iterator[Dict[Tuple[int, int], np.ndarray]]:
+        view: Dict[Tuple[int, int], np.ndarray] = {}
+        view_iter: Dict[Tuple[int, int], Iterator[np.ndarray]] = {}
         for chunk_idx in self.tick_views[start_tick]:
             chunk = self.chunks[chunk_idx]
             buffer, iterator = self.get_chunk_trajectory(chunk, start_tick=start_tick)
@@ -158,30 +145,28 @@ class WorldTrajectory:
                 next(it)
             yield view
 
-    @torch.no_grad()
-    def get_chunk_trajectory(self, chunk: ActiveChunk, start_tick: int = None) -> Tuple[torch.Tensor, Iterator[torch.Tensor]]:
-        # TODO Trim chunk height early
-        chunk_arr = torch.zeros((16, 256, 16), dtype=torch.long, device=self.device)
+    def get_chunk_trajectory(self, chunk: ActiveChunk, start_tick: int = None) -> Tuple[np.ndarray, Iterator[np.ndarray]]:
+        #TODO Tream chunk hight early
+        chunk_arr = np.zeros((16, 256, 16), dtype=np.uint16)
         start_tick = chunk.loaded_on_tick if start_tick is None else start_tick
 
         for section in chunk.sections:
             sy = int(section.sy) & 0x0F  # 0..15
-            # decode section (np) -> torch.long on device
-            sec_arr = torch.as_tensor(section.as_numpy_array(), dtype=torch.long, device=self.device)
+            sec_arr = section.as_numpy_array()
             y0 = sy * 16
-            chunk_arr[:, y0 : y0 + 16, :] = sec_arr
+            chunk_arr[:, y0:y0 + 16, :] = sec_arr
 
-        def _iter() -> Iterator[torch.Tensor]:
+        def _iter() -> Iterator[np.ndarray]:
+
             end = chunk.unloaded_on_tick if chunk.unloaded_on_tick is not None else self.age
             for idx in range(chunk.loaded_on_tick, end + 1):
                 updates = [chunk.updates[i] for i in chunk.tick_lookup.get(idx, [])]
-                for _, x, y, z, state in updates:
-                    chunk_arr[int(x) & 15, int(y), int(z) & 15] = int(state & 0xFFFF)
+                for utick, x, y, z, state in updates:
+                    chunk_arr[int(x) & 15, int(y), int(z) & 15] = np.uint16(state & 0xFFFF)
                 if idx >= start_tick:
                     yield chunk_arr
 
         return chunk_arr, _iter()
-
 
 @dataclass
 class _TrajectoryRecord:
@@ -199,22 +184,20 @@ class WorldBuffer:
     """
 
     # ---- WorldBuffer proper ----
-    def __init__(self, capacity: int, scene_size: Tuple[float, float, float], device: torch.device) -> None:
+    def __init__(self, capacity: int, scene_size: Tuple[float, float, float]) -> None:
         self.capacity = int(capacity)
         self.scene_size = scene_size
         self._records: deque[_TrajectoryRecord] = deque()
         self._current: Optional[_TrajectoryRecord] = None  # current (open or just-closed) episode
-        self._global_tick: int = -1  # increases by 1 per append
-        self.device = device
+        self._global_tick: int = -1                       # increases by 1 per append
 
-    @torch.no_grad()
     # ---- public API ----
     def append_update(self, world_update: WorldUpdate, camera_position: np.ndarray, is_first: bool, done: bool) -> None:
         self._global_tick += 1
 
         # Start new episode?
         if is_first or self._current is None:
-            new_trajectory = WorldTrajectory(device=self.device)
+            new_trajectory = WorldTrajectory()
             record = _TrajectoryRecord(start_tick=self._global_tick, latest_tick=self._global_tick, trajectory=new_trajectory)
             self._records.append(record)
             self._current = record
@@ -229,12 +212,9 @@ class WorldBuffer:
         # Prune at most one oldest finished trajectory if it fell outside the window.
         self._prune_oldest_if_needed()
 
-    @torch.no_grad()
-    def get_trajectories(
-        self, sample_index: np.ndarray, start_mask: np.ndarray
-    ) -> Iterator[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    def get_trajectories(self, sample_index: np.ndarray, start_mask: np.ndarray) -> Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """
-        Return a lazy view that can resolve (batch, time) -> world state tensors on demand.
+        Return a lazy view that can resolve (batch, time) -> world state dicts on demand.
         """
         if sample_index.ndim != 2 or start_mask.ndim != 2:
             raise ValueError("sample_index and start_mask must both be 2D (batch_size, batch_length)")
@@ -253,7 +233,7 @@ class WorldBuffer:
             row_pairs = [(int(sample_index[i, c]), int(l)) for c, l in zip(starts_cols, lengths)]
             gens_idx.append(row_pairs)
 
-        gens: List[List[Iterator[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]]] = []
+        gens = []
         for i in range(len(gens_idx)):
             gens.append([])
             for global_start, length in gens_idx[i]:
@@ -263,9 +243,8 @@ class WorldBuffer:
 
         gens = [chain.from_iterable(gen) for gen in gens]
         for _ in range(batch_length):
-            a_step = [next(g) for g in gens]  # per batch row: (cam, origin, vol)
-            cams, origins, vols = zip(*a_step)
-            yield (torch.stack(cams, dim=0), torch.stack(origins, dim=0), torch.stack(vols, dim=0))
+            yield tuple(np.stack(t, 0) for t in zip(*[next(g) for g in gens]))
+
 
     def _prune_oldest_if_needed(self) -> None:
         if not self._records:
@@ -282,9 +261,8 @@ class WorldBuffer:
                 return record, global_tick - record.start_tick
         raise KeyError("tick pruned or out of range")
 
-
 def compute_vox_origin_batch_np(
-    player_xyz: np.ndarray,  # shape (B, 3), float or int
+    player_xyz: np.ndarray,                  # shape (B, 3), float or int
     scene_size: Tuple[float, float, float],
     chunk_size: int = 16,
 ) -> np.ndarray:
