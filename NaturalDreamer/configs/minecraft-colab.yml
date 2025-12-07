@@ -1,16 +1,16 @@
 environmentName: Minecraft
-runName: Minecraft-Training-Attempt-11
+runName: Minecraft-Training-Attempt-12
 seed: 1
 
 gradientSteps: 60000
 envStepsPerTrainingStep: 32 #batchSize*batchLength/ number
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
-checkpointInterval: 500
+checkpointInterval: 250
 resume: False
 checkpointToLoad: 9k
 #
-episodesBeforeStart: 0
+episodesBeforeStart: 1
 numInteractionEpisodes: 1
 numEvaluationEpisodes: 1
 
@@ -18,7 +18,7 @@ numEvaluationEpisodes: 1
 dreamer:
   actionRepeat: 1
   batchSize: 12
-  batchLength: 48
+  batchLength: 56
   imaginationHorizon: 16
 
   recurrentSize: 8192 #1024*8

@@ -59,10 +59,9 @@ def run(configFile):
             pbar.update(1)
 
             if dreamer.totalGradientSteps % config.checkpointInterval == 0 and config.saveCheckpoints:
-                suffix = f"{dreamer.totalGradientSteps/1000:.0f}k"
-                dreamer.saveCheckpoint(f"{checkpointFilenameBase}_{suffix}")
-                evaluationScore = dreamer.environmentInteraction(envEvaluation, config.numEvaluationEpisodes, seed=config.seed, evaluation=True, saveVideo=True, filename=f"{videoFilenameBase}_{suffix}")
-                print(f"Saved Checkpoint and Video at {suffix:>6} gradient steps.")
+                dreamer.saveCheckpoint(f"{checkpointFilenameBase}_{dreamer.totalGradientSteps}")
+                # evaluationScore = dreamer.environmentInteraction(envEvaluation, config.numEvaluationEpisodes, seed=config.seed, evaluation=True, saveVideo=True, filename=f"{videoFilenameBase}_{dreamer.totalGradientSteps}")
+                print(f"Saved Checkpoint and Video at {dreamer.totalGradientSteps:>6} gradient steps.")
 
         if config.saveMetrics:
             metricsBase = {"envSteps": dreamer.totalEnvSteps, "gradientSteps": dreamer.totalGradientSteps, "totalReward" : mostRecentScore}
