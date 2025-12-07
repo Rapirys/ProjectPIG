@@ -35,7 +35,7 @@ dreamer:
   gradientNormType: 2
   gradientClip: 100
   reconstructionLossCoefficient: 4096
-  reconstruction3DLossCoefficient: 8
+  reconstruction3DLossCoefficient: 16
 
   discount: 0.997
   lambda_: 0.95
