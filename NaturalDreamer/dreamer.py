@@ -6,6 +6,8 @@ from torch.distributions import kl_divergence, Independent, OneHotCategoricalStr
 import numpy as np
 import os
 
+import concurrent.futures
+
 from utils import symlog
 from minecraft.loss import CE_ssc_loss
 from minecraft.minecraft import MinecraftSegmentationHead, get_classes
@@ -19,6 +21,8 @@ from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, Contin
 from utils import computeLambdaValues, Moments, collapse_world_updates
 from buffer import ReplayBuffer
 import imageio
+
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 
 class Dreamer:
@@ -75,6 +79,7 @@ class Dreamer:
         self.totalEpisodes      = 0
         self.totalEnvSteps      = 0
         self.totalGradientSteps = 0
+        self._reset_future = None
 
 
     def _flat_action(self, a: dict):
@@ -238,6 +243,14 @@ class Dreamer:
         return metrics
 
 
+
+    def prepareEnvironment(self, env, seed=None):
+        # start env.reset in the background if not already running
+        ep_seed = (seed + self.totalEpisodes) if seed is not None else None
+        if self._reset_future is None or self._reset_future.done():
+            self._reset_future = _executor.submit(env.reset, seed=ep_seed)
+        return self._reset_future
+
     @torch.no_grad()
     def environmentInteraction(self, env, numEpisodes,
                                seed=None, evaluation=False, saveVideo=False, filename="videos/unnamedVideo", fps=30, macroBlockSize=16):
@@ -251,7 +264,9 @@ class Dreamer:
             latentState    = torch.zeros(1, self.latentSize,    device=self.device)
             prevActionVec  = torch.zeros(1, self.actionSize,    device=self.device)
 
-            observation, info = env.reset(seed= (seed + self.totalEpisodes if seed else None))
+            future  = self._reset_future or self.prepareEnvironment(env)
+            observation, info = future.result()
+            self._reset_future = None
 
             registry = info["BlockStateRegistry"]
             if registry:
