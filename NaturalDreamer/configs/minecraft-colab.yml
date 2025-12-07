@@ -3,10 +3,10 @@ runName: Minecraft-Training-Attempt-11
 seed: 1
 
 gradientSteps: 60000
-envStepsPerTrainingStep: 8 #batchSize*batchLength/ number
+envStepsPerTrainingStep: 32 #batchSize*batchLength/ number
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
-checkpointInterval: 1000
+checkpointInterval: 500
 resume: False
 checkpointToLoad: 9k
 #
