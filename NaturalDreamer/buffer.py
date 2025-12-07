@@ -17,7 +17,7 @@ class ReplayBuffer(object):
         self.rewards             = np.empty((self.capacity, 1), dtype=np.float32)
         self.is_first            = np.empty((self.capacity, 1), dtype=np.float32) #TODO Make is_first - boolean
         self.dones               = np.empty((self.capacity, 1), dtype=np.float32)
-        self.world_buffer = WorldBuffer(self.capacity, config.minecraft.scene_size)
+        self.world_buffer = WorldBuffer(self.capacity, config.minecraft.scene_size, device)
         self.camera_position = np.empty((self.capacity, 5), dtype=np.float32) #
 
         self.bufferIndex = 0

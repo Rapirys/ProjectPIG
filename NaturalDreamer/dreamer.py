@@ -118,14 +118,10 @@ class Dreamer:
 
 
             if enable3dLoss:
-                camera_position, grid_origin, grid_np = next(data.world_trajectories)
-                camera_position = torch.from_numpy(camera_position).to(self.device)
-                grid_origin = torch.from_numpy(grid_origin).to(self.device)
-                grid = torch.from_numpy(grid_np).to(self.device)
-
-                assert grid_np.min() >= 0, "grid contains negative global_id values"
-                assert grid_np.max() < self.block_state_registry_lut.shape[0], (
-                    f"grid contains global_id >= lut_size: max={grid_np.max()}, lut_size={self.block_state_registry_lut.shape[0]}"
+                camera_position, grid_origin, grid = next(data.world_trajectories)
+                assert grid.min() >= 0, "grid contains negative global_id values"
+                assert grid.max() < self.block_state_registry_lut.shape[0], (
+                    f"grid contains global_id >= lut_size: max={grid.max()}, lut_size={self.block_state_registry_lut.shape[0]}"
                 )
                 block_id_grid = self.block_state_registry_lut[grid.long()]  # TODO Do not need this mapping in final version
                 full_state_step = torch.cat((recurrentState, posterior), dim=-1)
@@ -154,8 +150,8 @@ class Dreamer:
 
 
         reconstructionMeans = self.decoder(fullStates.view(-1, self.fullStateSize)).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
-        reconstructionMeans = reconstructionMeans
-        reconstructionLoss = -Normal(reconstructionMeans, 1.0).log_prob(data.observations[:, 1:]).mean() - 0.9189
+        reconstructionMeans = symlog(reconstructionMeans)
+        reconstructionLoss = -Normal(reconstructionMeans, 1.0).log_prob(symlog(data.observations[:, 1:])).mean()
 
         rewardDistribution  =  self.rewardPredictor(fullStates)
         rewardLoss          = -rewardDistribution.log_prob(data.rewards[:, 1:].squeeze(-1)).mean()
@@ -175,8 +171,7 @@ class Dreamer:
         reconstruction3DLoss = reconstruction3DLoss / (self.config.batchLength - 1)
         reconstruction3D_CE = reconstruction3D_CE / (self.config.batchLength - 1)
 
-        worldModelLoss =  self.config.reconstructionLossCoefficient * reconstructionLoss +\
-                          self.config.reconstruction3DLossCoefficient * reconstruction3DLoss + rewardLoss + klLoss  # I think that the reconstruction loss is relatively a bit too high (11k)
+        worldModelLoss =  self.config.reconstructionLossCoefficient * reconstructionLoss + rewardLoss + klLoss + reconstruction3DLoss # I think that the reconstruction loss is relatively a bit too high (11k)
 
         self.worldModelOptimizer.zero_grad()
         #TODO Add loss masking
@@ -269,7 +264,7 @@ class Dreamer:
             self._reset_future = None
 
             registry = info["BlockStateRegistry"]
-            if registry:
+            if not self.block_state_registry:
                 assert len(get_classes(registry)) == self.classes
                 self.block_state_registry = registry
                 self.block_state_registry_lut = build_globalid_to_blockid_lut(self.block_state_registry, self.device)
