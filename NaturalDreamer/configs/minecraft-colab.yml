@@ -10,7 +10,7 @@ checkpointInterval: 250
 resume: True
 checkpointToLoad: 250
 #
-episodesBeforeStart: 1
+episodesBeforeStart: 2
 numInteractionEpisodes: 1
 numEvaluationEpisodes: 1
 
