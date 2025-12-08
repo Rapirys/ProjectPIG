@@ -58,7 +58,9 @@ class ReplayBuffer(object):
         first    = torch.as_tensor(self.is_first[sampleIndex], device=self.device)
 
         world_sample_index = self.tick_index[sampleIndex]
-        world_trajectories = self.world_buffer.get_trajectories(world_sample_index, self.is_first[sampleIndex].squeeze(-1).astype(bool))
+        starts_mask = self.is_first[sampleIndex].squeeze(-1).astype(bool)  # Add restart points
+        starts_mask[:, 1:] |= world_sample_index[:, 1:] < world_sample_index[:, :-1] #TODO avoid sampling that crosses trajectory boundary
+        world_trajectories = self.world_buffer.get_trajectories(world_sample_index, starts_mask)
 
         return attridict({
                 "observations": observations,
