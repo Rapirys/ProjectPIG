@@ -261,17 +261,31 @@ class WorldBuffer:
                 return record, global_tick - record.start_tick
         raise KeyError("tick pruned or out of range")
 
+# TODO I need siriosly more rhought to it
+# def compute_vox_origin_batch_np(
+#     player_xyz: np.ndarray,                  # shape (B, 3), float or int
+#     scene_size: Tuple[float, float, float],
+#     chunk_size: int = 16,
+# ) -> np.ndarray:
+#     size_x, size_y, size_z = scene_size
+#     min_chunk_x = (np.floor_divide(player_xyz[:, 0], chunk_size) * chunk_size) - (size_x // 2)
+#     min_chunk_z = (np.floor_divide(player_xyz[:, 2], chunk_size) * chunk_size) - (size_z // 2)
+#
+#     half_y = size_y // 2
+#     min_chunk_y = np.clip(np.floor(player_xyz[:, 1] - half_y), 0, None)
+#
+#     mins = np.stack([min_chunk_x, min_chunk_y, min_chunk_z], axis=-1)
+#     return mins.astype(np.int32, copy=False)
+
 def compute_vox_origin_batch_np(
     player_xyz: np.ndarray,                  # shape (B, 3), float or int
     scene_size: Tuple[float, float, float],
     chunk_size: int = 16,
 ) -> np.ndarray:
     size_x, size_y, size_z = scene_size
-    min_chunk_x = (np.floor_divide(player_xyz[:, 0], chunk_size) * chunk_size) - (size_x // 2)
-    min_chunk_z = (np.floor_divide(player_xyz[:, 2], chunk_size) * chunk_size) - (size_z // 2)
-
-    half_y = size_y // 2
-    min_chunk_y = np.clip(np.floor(player_xyz[:, 1] - half_y), 0, None)
+    min_chunk_x = np.floor(player_xyz[:, 0] - (size_x // 2))
+    min_chunk_z = np.floor(player_xyz[:, 2] - (size_z // 2))
+    min_chunk_y = np.clip(np.floor(player_xyz[:, 1] - size_y // 2), 0, None)
 
     mins = np.stack([min_chunk_x, min_chunk_y, min_chunk_z], axis=-1)
     return mins.astype(np.int32, copy=False)
