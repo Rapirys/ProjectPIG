@@ -126,8 +126,22 @@ class CommandParser:
                         "moveMouse 70 -35",
                         "moveMouse -70 -35",
                     ]
+                elif verb == "move":
+                    actions["move"] = [
+                        "forward 0 back 0 right 0 left 0",
+
+                        "forward 1 back 0 right 0 left 0",
+                        "forward 0 back 1 right 0 left 0",
+                        "forward 0 back 0 right 1 left 0",
+                        "forward 0 back 0 right 0 left 1",
+
+                        "forward 1 back 0 right 1 left 0",
+                        "forward 1 back 0 right 0 left 1",
+                        "forward 0 back 1 right 1 left 0",
+                        "forward 0 back 1 right 0 left 1"
+                    ]
                 elif verb == "hotbar":
-                    actions["hotbar"] = [f"hotbar.{i} 1" for i in range(1, 10)]
+                    actions["hotbar"] = [f"hotbar.{i} 1" for i in range(1, 4)] #TODO all range needs 10 hotbur slots
                 else:
                     actions[verb] = [verb + " 0", verb + " 1"]
             # elif type == 'MissionQuit':
