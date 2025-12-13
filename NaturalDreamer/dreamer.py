@@ -143,7 +143,7 @@ class Dreamer:
                 self.minecraftHeadOptimiser.zero_grad(set_to_none=True)
                 loss3d.backward()
                 ssc_gradients = ssc_input.grad.detach()
-                self.minecraftHeadOptimiser.step()
+                # self.minecraftHeadOptimiser.step()
                 reconstruction3DLoss = reconstruction3DLoss + (full_state_step * ssc_gradients).sum()
 
         recurrentStates             = torch.stack(recurrentStates,              dim=1) # (batchSize, batchLength-1, recurrentSize)
@@ -180,9 +180,9 @@ class Dreamer:
 
         self.worldModelOptimizer.zero_grad()
         #TODO Add loss masking
-        worldModelLoss.backward()
-        nn.utils.clip_grad_norm_(self.worldModelParameters, self.config.gradientClip, norm_type=self.config.gradientNormType)
-        self.worldModelOptimizer.step()
+        # worldModelLoss.backward()
+        # nn.utils.clip_grad_norm_(self.worldModelParameters, self.config.gradientClip, norm_type=self.config.gradientNormType)
+        # self.worldModelOptimizer.step()
 
         klLossShiftForGraphing = (self.config.betaPrior + self.config.betaPosterior)*self.config.freeNats
         metrics = {
@@ -375,10 +375,10 @@ class Dreamer:
         self.actor.load_state_dict(checkpoint["actor"])
         self.critic.load_state_dict(checkpoint["critic"])
         self.minecraftSegmentationHead.load_state_dict(checkpoint["minecraftSegmentationHead"])
-        self.minecraftHeadOptimiser.load_state_dict(checkpoint["minecraftHeadOptimiser"])
-        self.worldModelOptimizer.load_state_dict(checkpoint["worldModelOptimizer"])
-        self.criticOptimizer.load_state_dict(checkpoint["criticOptimizer"])
-        self.actorOptimizer.load_state_dict(checkpoint["actorOptimizer"])
+        # self.minecraftHeadOptimiser.load_state_dict(checkpoint["minecraftHeadOptimiser"])
+        # self.worldModelOptimizer.load_state_dict(checkpoint["worldModelOptimizer"])
+        # self.criticOptimizer.load_state_dict(checkpoint["criticOptimizer"])
+        # self.actorOptimizer.load_state_dict(checkpoint["actorOptimizer"])
         self.totalEpisodes = checkpoint["totalEpisodes"]
         self.totalEnvSteps = checkpoint["totalEnvSteps"]
         self.totalGradientSteps = checkpoint["totalGradientSteps"]

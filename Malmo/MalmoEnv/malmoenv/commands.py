@@ -55,8 +55,8 @@ class CommandParser:
     all_nearbycraft = ["nearbyCraft"]
     all_nearbysmelt = ["nearbySmelt"]
     all_mission_quit = ["quit"]
-    all_human_level = ["forward", "back", "left", "right", "jump", "sneak", "sprint", # "inventory",
-                       "swapHands", "use", "attack", "moveMouse", "drop",
+    all_human_level = ["move", "jump", "sneak", "sprint", # "inventory",
+                        "use", "attack", "moveMouse", #"drop", "swapHands",
                        "hotbar"]
 
     def __init__(self, action_filter=None):
@@ -128,17 +128,17 @@ class CommandParser:
                     ]
                 elif verb == "move":
                     actions["move"] = [
-                        "forward 0 back 0 right 0 left 0",
+                        "forward 0\nback 0\nright 0\nleft 0",
 
-                        "forward 1 back 0 right 0 left 0",
-                        "forward 0 back 1 right 0 left 0",
-                        "forward 0 back 0 right 1 left 0",
-                        "forward 0 back 0 right 0 left 1",
+                        "forward 1\nback 0\nright 0\nleft 0",
+                        "forward 0\nback 1\nright 0\nleft 0",
+                        "forward 0\nback 0\nright 1\nleft 0",
+                        "forward 0\nback 0\nright 0\nleft 1",
 
-                        "forward 1 back 0 right 1 left 0",
-                        "forward 1 back 0 right 0 left 1",
-                        "forward 0 back 1 right 1 left 0",
-                        "forward 0 back 1 right 0 left 1"
+                        "forward 1\nback 0\nright 1\nleft 0",
+                        "forward 1\nback 0\nright 0\nleft 1",
+                        "forward 0\nback 1\nright 1\nleft 0",
+                        "forward 0\nback 1\nright 0\nleft 1"
                     ]
                 elif verb == "hotbar":
                     actions["hotbar"] = [f"hotbar.{i} 1" for i in range(1, 4)] #TODO all range needs 10 hotbur slots
