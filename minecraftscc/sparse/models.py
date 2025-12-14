@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import Normal
 
 
 class DepthMDNHead(nn.Module):
@@ -50,12 +51,12 @@ class DepthMDNHead(nn.Module):
 
         return mixture_weights, component_means, component_scales
 
-def gaussian_mdn_nll(
+def gaussian_mdn_nll_loss(
     mixture_weights: torch.Tensor,
     component_means: torch.Tensor,
     component_scales: torch.Tensor,
     depth_ground_truth: torch.Tensor,
-    min_prob: float = 1e-12,
+    min_prob: float = 1e-10,
 ) -> torch.Tensor:
     """
     Negative log-likelihood for a per-pixel Gaussian mixture.
@@ -71,17 +72,13 @@ def gaussian_mdn_nll(
         Scalar loss (mean over N,H,W).
     """
     depth = depth_ground_truth
-    # log N(d | mu, sigma^2) = -0.5*log(2*pi) - log(sigma) - 0.5*((d-mu)/sigma)^2
-    log_two_pi = math.log(2.0 * math.pi)
-    standardized_error = (depth - component_means) / component_scales
+    if depth.dim() == 3:
+        depth = depth.unsqueeze(1)
 
-    log_component_pdf = (
-        -0.5 * log_two_pi
-        - torch.log(component_scales)
-        - 0.5 * standardized_error.pow(2)
-    )
-
-    log_mixture_weights = torch.log(mixture_weights.clamp_min(min_prob))
-    log_likelihood = torch.logsumexp(log_mixture_weights + log_component_pdf, dim=1)  # [N, H, W]
-
-    return (-log_likelihood).mean()
+    # log N(d | mu_k, sigma_k^2) for each component k
+    log_component_pdf = Normal(component_means, component_scales).log_prob(depth)  # [N, K, H, W]
+    # log pi_k
+    log_weights = torch.log(mixture_weights.clamp_min(min_prob))  # [N, K, H, W]
+    # log Σ_k pi_k * N_k(d)  (stable)
+    log_mixture_pdf = torch.logsumexp(log_weights + log_component_pdf, dim=1)  # [N, H, W]
+    return (-log_mixture_pdf).mean()

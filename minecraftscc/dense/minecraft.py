@@ -1,8 +1,8 @@
 import torch
 from torch import nn
 
-from minecraftscc.monoscene import FLoSP, SegmentationHead, UNet3D
-from minecraftscc.utils import (
+from minecraftscc.dense.monoscene import FLoSP, SegmentationHead, UNet3D
+from minecraftscc.dense.utils import (
     vox2pix,
     intrinsics_from_fov,
     extrinsics_from_player_position,

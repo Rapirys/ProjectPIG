@@ -7,15 +7,17 @@ import os
 
 import concurrent.futures
 
-from minecraftscc.loss import CE_ssc_loss
-from minecraftscc.minecraft import MinecraftSegmentationHead, get_classes
-from minecraftscc.utils import (
+from minecraftscc.dense.loss import CE_ssc_loss
+from minecraftscc.dense.minecraft import MinecraftSegmentationHead, get_classes
+from minecraftscc.dense.utils import (
     extract_camera_position_from_info,
     build_globalid_to_blockid_lut,
 )
 from malmoenv.world_tracking.utils import decode_world_update
-from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, ContinueModel, EncoderConv, DecoderConv, Actor, Critic, \
-    HybridActor
+from minecraftscc.sparse.models import DepthMDNHead, gaussian_mdn_nll_loss
+from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, ContinueModel, EncoderConv, DecoderConv, \
+    Actor, Critic, \
+    HybridActor, Decoder3d, DecoderDepth
 from utils import computeLambdaValues, Moments, collapse_world_updates
 from buffer import ReplayBuffer
 import imageio
@@ -67,9 +69,19 @@ class Dreamer:
             MinecraftSegmentationHead(self.config, self.device, self.observationShape, self.classes).to(self.device)
         )
 
+        decoderDepth = DecoderConv(
+            self.fullStateSize, [config.depth.feature_size, self.config.resolution[0], self.config.resolution[1]],
+            config.decoder #TODO feature_size is under questions, especially if we increase the resolution
+        )
+        self.depthPredictionHead = DecoderDepth(
+            decoderDepth,
+            DepthMDNHead(config.depth.feature_size)
+        ).to(self.device)
+
 
         self.worldModelParameters = (list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.recurrentModel.parameters()) +
-                                     list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()))
+                                     list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()) +
+                                     list(self.depthPredictionHead.parameters()))
 
 
         self.worldModelOptimizer    = torch.optim.Adam(self.worldModelParameters,   lr=self.config.worldModelLR)
@@ -157,10 +169,14 @@ class Dreamer:
         posteriorsLogits            = torch.stack(posteriorsLogits,             dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
         fullStates                  = torch.cat((recurrentStates, posteriors), dim=-1) # (batchSize, batchLength-1, recurrentSize + latentLength*latentClasses)
 
-
-        reconstructionMeans = self.decoder(fullStates.view(-1, self.fullStateSize)).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
+        fullStatesTransformedBatch = fullStates.view(-1, self.fullStateSize)
+        reconstructionMeans = self.decoder(fullStatesTransformedBatch).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
         reconstructionMeans = reconstructionMeans
         reconstructionLoss = -Normal(reconstructionMeans, 1.0).log_prob(data.observations[:, 1:]).mean() - 0.9189
+
+        depthPrediction = self.depthPredictionHead(fullStatesTransformedBatch)
+        depthGroundTruth = data.depths[:, 1:].view(-1, *self.observationShape)
+        depthPredictionLoss = gaussian_mdn_nll_loss(*depthPrediction, depthGroundTruth) - 0.9189
 
         rewardDistribution  =  self.rewardPredictor(fullStates)
         rewardLoss          = -rewardDistribution.log_prob(data.rewards[:, 1:].squeeze(-1)).mean()
@@ -181,7 +197,8 @@ class Dreamer:
         reconstruction3D_CE = reconstruction3D_CE / (self.config.batchLength - 1)
 
         worldModelLoss =  self.config.reconstructionLossCoefficient * reconstructionLoss +\
-                          self.config.reconstruction3DLossCoefficient * reconstruction3DLoss + rewardLoss + klLoss  # I think that the reconstruction loss is relatively a bit too high (11k)
+                          self.config.reconstruction3DLossCoefficient * reconstruction3DLoss + rewardLoss + klLoss +\
+                          self.config.depthPredictionLossCoefficient * depthPredictionLoss
 
         self.worldModelOptimizer.zero_grad()
         worldModelLoss.backward()
@@ -192,7 +209,8 @@ class Dreamer:
         metrics = {
             "worldModelLoss"        : worldModelLoss.item() - klLossShiftForGraphing,
             "reconstructionLoss"    : reconstructionLoss.item(),
-            "reconstruction3DLoss"  :  reconstruction3D_CE.item() if enable3dLoss else 0,
+            "depthPredictionLoss"   :   depthPredictionLoss.item(),
+            "reconstruction3DLoss"  : reconstruction3D_CE.item() if enable3dLoss else 0,
             "rewardPredictorLoss"   : rewardLoss.item(),
             "klLoss"                : klLoss.item() - klLossShiftForGraphing}
         return fullStates.view(-1, self.fullStateSize).detach(), metrics
@@ -270,6 +288,7 @@ class Dreamer:
 
             future  = self._reset_future or self.prepareEnvironment(env)
             observation, info = future.result()
+            depth = info["depth"]
             self._reset_future = None
 
             registry = info["BlockStateRegistry"]
@@ -296,6 +315,7 @@ class Dreamer:
 
                 for rep in range(action_repeat):
                     nextObservation, reward, done, info = env.step(actionFlat.cpu().numpy().reshape(-1))
+                    nextDepth = info["depth"]
                     totalReward += reward
 
                     # stream update per low-level tick
@@ -315,13 +335,14 @@ class Dreamer:
 
 
                 if not evaluation:
-                    self.buffer.add(observation, world_state, camera_position, prevActionVec.cpu().numpy().reshape(-1), totalReward, done, is_first)
+                    self.buffer.add(observation, depth, world_state, camera_position, prevActionVec.cpu().numpy().reshape(-1), totalReward, done, is_first)
                     world_state = collapse_world_updates(world_updates)
                     camera_position = next_camera_position
                 is_first = False
 
                 encodedObservation = self.encoder(torch.from_numpy(nextObservation).float().unsqueeze(0).to(self.device))
                 observation = nextObservation
+                depth = nextDepth
                 currentScore += totalReward
 
                 if done:

@@ -143,7 +143,14 @@ class DecoderConv(nn.Module):
         return self.network(x)
 
 
-class DecoderDepth():
+class DecoderDepth(nn.Module):
+    def __init__(self, decoder, depth_head):
+        super().__init__()
+        self.decoder = decoder
+        self.depth_head = depth_head
+
+    def forward(self, x):
+        return self.depth_head(self.decoder(x))
 
 
 class Decoder3d(nn.Module):
