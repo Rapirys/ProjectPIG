@@ -1,13 +1,12 @@
 import torch
 from torch import nn
 
-from NaturalDreamer.minecraft.monoscene import FLoSP, SegmentationHead, UNet3D
-from NaturalDreamer.minecraft.utils import (
+from minecraftscc.monoscene import FLoSP, SegmentationHead, UNet3D
+from minecraftscc.utils import (
     vox2pix,
     intrinsics_from_fov,
     extrinsics_from_player_position,
 )
-from NaturalDreamer.networks import DecoderConv
 
 
 class MinecraftSegmentationHead(nn.Module):
@@ -22,7 +21,7 @@ class MinecraftSegmentationHead(nn.Module):
     # number of block states (
     #predicrs grid B,X,Y,Z,B_c,16
 
-    def __init__(self, config, device, input_size, observationShape, classes):
+    def __init__(self, config, device, observationShape, classes):
         super().__init__()
 
         self.device = device
@@ -37,9 +36,6 @@ class MinecraftSegmentationHead(nn.Module):
         self.projection_scale = config.minecraft.projection_scale
 
        # 2d features
-        self.decoder2d = DecoderConv(
-            input_size, [config.minecraft.prediction_head.feature_size, self.img_H, self.img_W], config.decoder #TODO feature_size is under questions, especially if we increase the resolution
-        ).to(self.device)
         self.flosp = FLoSP(self.scene_size, self.projection_scale).to(self.device)
         self.net_3d_decoder = UNet3D(config).to(self.device)
         self.segmentationHead = SegmentationHead(config, classes).to(self.device)
@@ -54,7 +50,6 @@ class MinecraftSegmentationHead(nn.Module):
     def forward(self, x, camera_position, grid_origin):
         cam_E = extrinsics_from_player_position(camera_position, device=self.device)
         projected_pix, fov_mask, _, _ = vox2pix(cam_E, self.cam_K, grid_origin, self.img_W, self.img_H, self.scene_size)
-        x = self.decoder2d(x)
         out = self.network((x, projected_pix, fov_mask))
         return out, fov_mask
 

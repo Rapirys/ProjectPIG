@@ -143,6 +143,19 @@ class DecoderConv(nn.Module):
         return self.network(x)
 
 
+class DecoderDepth():
+
+
+class Decoder3d(nn.Module):
+    def __init__(self, decoder, minecraftHead):
+        super().__init__()
+        self.decoder = decoder
+        self.minecraftHead = minecraftHead
+
+    def forward(self, x, camera_position, grid_origin):
+        return self.minecraftHead(self.decoder(x), camera_position, grid_origin)
+
+
 class Actor(nn.Module):
     def __init__(self, inputSize, actionSize, actionLow, actionHigh, device, config):
         super().__init__()

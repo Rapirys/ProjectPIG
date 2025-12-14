@@ -40,7 +40,7 @@
             </Inventory>
         </AgentStart>
         <AgentHandlers>
-            <VideoProducer want_depth="true">
+            <VideoProducer>
 <!--                <Width>64</Width>-->
 <!--                <Height>64</Height>-->
 <!--                <Width>640</Width>-->
@@ -48,6 +48,10 @@
                 <Width>360</Width>
                 <Height>360</Height>
             </VideoProducer>
+            <DepthProducer>
+                <Width>360</Width>
+                <Height>360</Height>
+            </DepthProducer>
 
             <ObservationFromBlocksStream/>
             <ObservationFromBlockStateRegistry/>

@@ -1,17 +1,15 @@
 import cv2
 import torch
 import torch.nn as nn
-from torch import profiler
 from torch.distributions import kl_divergence, Independent, OneHotCategoricalStraightThrough, Normal
 import numpy as np
 import os
 
 import concurrent.futures
 
-from utils import symlog
-from minecraft.loss import CE_ssc_loss
-from minecraft.minecraft import MinecraftSegmentationHead, get_classes
-from minecraft.utils import (
+from minecraftscc.loss import CE_ssc_loss
+from minecraftscc.minecraft import MinecraftSegmentationHead, get_classes
+from minecraftscc.utils import (
     extract_camera_position_from_info,
     build_globalid_to_blockid_lut,
 )
@@ -60,8 +58,15 @@ class Dreamer:
         self.block_state_registry = None
         self.block_state_registry_lut = None
         self.classes = config.minecraft.classes
-        self.minecraftSegmentationHead = MinecraftSegmentationHead(self.config, self.device, self.fullStateSize,
-                                                                   self.observationShape, self.classes).to(self.device)
+        decoder3d = DecoderConv(
+            self.fullStateSize, [config.minecraft.prediction_head.feature_size, self.config.resolution[0], self.config.resolution[1]],
+            config.decoder #TODO feature_size is under questions, especially if we increase the resolution
+        ).to(self.device)
+        self.minecraftSegmentationHead = Decoder3d(
+            decoder3d,
+            MinecraftSegmentationHead(self.config, self.device, self.observationShape, self.classes).to(self.device)
+        )
+
 
         self.worldModelParameters = (list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.recurrentModel.parameters()) +
                                      list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()))
@@ -143,7 +148,7 @@ class Dreamer:
                 self.minecraftHeadOptimiser.zero_grad(set_to_none=True)
                 loss3d.backward()
                 ssc_gradients = ssc_input.grad.detach()
-                # self.minecraftHeadOptimiser.step()
+                self.minecraftHeadOptimiser.step()
                 reconstruction3DLoss = reconstruction3DLoss + (full_state_step * ssc_gradients).sum()
 
         recurrentStates             = torch.stack(recurrentStates,              dim=1) # (batchSize, batchLength-1, recurrentSize)
@@ -179,10 +184,9 @@ class Dreamer:
                           self.config.reconstruction3DLossCoefficient * reconstruction3DLoss + rewardLoss + klLoss  # I think that the reconstruction loss is relatively a bit too high (11k)
 
         self.worldModelOptimizer.zero_grad()
-        #TODO Add loss masking
-        # worldModelLoss.backward()
-        # nn.utils.clip_grad_norm_(self.worldModelParameters, self.config.gradientClip, norm_type=self.config.gradientNormType)
-        # self.worldModelOptimizer.step()
+        worldModelLoss.backward()
+        nn.utils.clip_grad_norm_(self.worldModelParameters, self.config.gradientClip, norm_type=self.config.gradientNormType)
+        self.worldModelOptimizer.step()
 
         klLossShiftForGraphing = (self.config.betaPrior + self.config.betaPosterior)*self.config.freeNats
         metrics = {

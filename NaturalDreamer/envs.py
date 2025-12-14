@@ -1,6 +1,7 @@
 import math
 from pathlib import Path
 
+import cv2
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.wrappers import TransformAction
@@ -118,21 +119,21 @@ class MinecraftWrapper(gym.Wrapper):
         H, W, C = observation_space.shape
         low = observation_space.low[..., :3]
         high = observation_space.high[..., :3]
-        assert C == 4, ("depth is expected" if C == 3 else "")
+        # assert C == 4, ("depth is expected" if C == 3 else "")
         self.observation_space = gym.spaces.Box(low=low, high=high, shape=(H, W, 3), dtype=observation_space.dtype)
         self._rgb = np.s_[:, :, :3]
-        self._depth = np.s_[:, :, 3]
+        # self._depth = np.s_[:, :, 3]
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
-        rgb, depth = obs[self._rgb], obs[self._depth]
-        info["depth"] = depth
+        rgb = obs[self._rgb]
+        info["depth"] = cv2.resize(info["depth"], (rgb.shape[1], rgb.shape[0]), interpolation=cv2.INTER_AREA)
         return rgb, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        rgb, depth = obs[self._rgb], obs[self._depth]
-        info["depth"] = depth
+        rgb = obs[self._rgb]
+        info["depth"] = cv2.resize(info["depth"], (rgb.shape[1], rgb.shape[0]), interpolation=cv2.INTER_AREA)
         return rgb, reward, terminated, truncated, info
 
 
