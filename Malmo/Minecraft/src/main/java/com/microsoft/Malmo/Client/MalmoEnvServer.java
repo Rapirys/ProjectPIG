@@ -74,6 +74,7 @@ public class MalmoEnvServer implements IWantToQuit {
         boolean running = false;
         double reward = 0.0;
         byte[] obs = null;
+        byte[] depthObs = null;
         String info = "{}";
         byte[] worldState = null;
         LinkedList<String> commands = new LinkedList<String>();
@@ -373,6 +374,7 @@ public class MalmoEnvServer implements IWantToQuit {
         envState.reward = 0.0;
         envState.commands.clear();
         envState.obs = null;
+        envState.depthObs = null;
         envState.info = "{}";
         envState.worldState = null;
 
@@ -450,6 +452,7 @@ public class MalmoEnvServer implements IWantToQuit {
         double reward = 0.0;
         boolean done;
         byte[] obs;
+        byte[] depthObs;
         String info = "";
         byte[] worldState = null;
         boolean sent = true;
@@ -497,6 +500,7 @@ public class MalmoEnvServer implements IWantToQuit {
             profiler.startSection("getObservation");
             // After which, get the observations.
             obs = getObservation(done);
+            depthObs = getDepthObservation(done);
 
             // TimeHelper.SyncManager.debugLog("[MALMO_ENV_SERVER] <STEP> Observation received. Getting info.");
 
@@ -531,6 +535,7 @@ public class MalmoEnvServer implements IWantToQuit {
             previousEnvState.reward = envState.reward;
             previousEnvState.commands = envState.commands;
             previousEnvState.obs = envState.obs;
+            previousEnvState.depthObs = envState.depthObs;
             previousEnvState.worldState = envState.worldState;
             previousEnvState.info = envState.info;
             previousEnvState.missionInit = envState.missionInit;
@@ -547,6 +552,7 @@ public class MalmoEnvServer implements IWantToQuit {
 
             envState.info = "{}";
             envState.obs = null;
+            envState.depthObs = null;
             envState.worldState  = null;
             envState.reward = 0.0;
 
@@ -561,6 +567,9 @@ public class MalmoEnvServer implements IWantToQuit {
         profiler.startSection("writeObs");
         dout.writeInt(obs.length);
         dout.write(obs);
+
+        dout.writeInt(depthObs.length);
+        dout.write(depthObs);
 
         dout.writeInt(BYTES_DOUBLE + 2);
         dout.writeDouble(reward);
@@ -652,6 +661,7 @@ public class MalmoEnvServer implements IWantToQuit {
 
         DataOutputStream dout = new DataOutputStream(socket.getOutputStream());
         byte[] obs;
+        byte[] depthObs;
         boolean done;
         String info = "";
         byte[] worldState;
@@ -683,6 +693,7 @@ public class MalmoEnvServer implements IWantToQuit {
             // TimeHelper.SyncManager.debugLog("[MALMO_ENV_SERVER] <PEEK> Getting observation.");
 
             obs = getObservation(false);
+            depthObs = getDepthObservation(false);
 
             // TimeHelper.SyncManager.debugLog("[MALMO_ENV_SERVER] <PEEK> Observation acquired.");
             done = envState.done;
@@ -694,6 +705,9 @@ public class MalmoEnvServer implements IWantToQuit {
 
         dout.writeInt(obs.length);
         dout.write(obs);
+
+        dout.writeInt(depthObs.length);
+        dout.write(depthObs);
 
         byte[] infoBytes = info.getBytes(utf8);
         dout.writeInt(infoBytes.length);
@@ -712,11 +726,14 @@ public class MalmoEnvServer implements IWantToQuit {
     // Get the current observation. If none and not done wait for a short time.
     public byte[] getObservation(boolean done)  {
         byte[] obs = envState.obs;
-        if (obs == null){
-            
-        }
         return obs;
     }
+
+    public byte[] getDepthObservation(boolean done)  {
+        byte[] obs = envState.depthObs;
+        return obs;
+    }
+
 
     // Handler for <Find> messages - used by non-zero roles to discover integrated server port from primary (role 0) service.
 
@@ -983,6 +1000,11 @@ public class MalmoEnvServer implements IWantToQuit {
             // lock.unlock();
         }
     }
+
+    public void addDepthFrame(byte[] frame) {
+        envState.depthObs = frame;
+    }
+
 
     public void notifyIntegrationServerStarted(int integrationServerPort) {
          lock.lock();

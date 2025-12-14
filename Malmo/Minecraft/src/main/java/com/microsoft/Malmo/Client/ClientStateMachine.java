@@ -1969,6 +1969,7 @@ public class ClientStateMachine extends StateMachine implements IMalmoMessageLis
             if (AddressHelper.getMissionControlPort() == 0) {
                 if (envServer != null) {
                     byte[] obs = envServer.getObservation(false);
+                    byte[] depthObs = envServer.getDepthObservation(false);
                     envServer.endMission();
                 }
             }

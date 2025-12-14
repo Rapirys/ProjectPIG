@@ -25,18 +25,16 @@ import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+import com.microsoft.Malmo.MissionHandlers.DepthProducerImplementation;
 import com.microsoft.Malmo.Utils.AddressHelper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.launchwrapper.Launch;
-import net.minecraftforge.client.event.GuiScreenEvent;
-import net.minecraftforge.client.event.RenderGameOverlayEvent;
 import net.minecraftforge.client.event.RenderWorldLastEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent.Phase;
 import net.minecraftforge.fml.common.gameevent.TickEvent.RenderTickEvent;
-import net.minecraftforge.client.event.RenderHandEvent;
 
 import org.lwjgl.BufferUtils;
 import org.lwjgl.LWJGLException;
@@ -265,14 +263,21 @@ public class VideoHook {
      */
     @SubscribeEvent
     public void postRender(PostRenderEvent event) {
-        //        // WHG: HAND RENDER
-        //        // To render with hand convert RenderWorldLastEvent to RenderGameOverlayEvent.Pre
-        //        // Then include the following lines
-        //        if (event.getType() != RenderGameOverlayEvent.ElementType.ALL)
-        //            return;
-                float partialTicks = event.getPartialTicks();
-                getVideo(partialTicks);
-            }
+        if (videoProducer instanceof DepthProducerImplementation) {
+            return;
+        }
+        float partialTicks = event.getPartialTicks();
+        getVideo(partialTicks);
+    }
+
+    @SubscribeEvent
+    public void postRender(RenderWorldLastEvent event) {
+        if (!(videoProducer instanceof DepthProducerImplementation)) {
+            return;
+        }
+        float partialTicks = event.getPartialTicks();
+        getVideo(partialTicks);
+    }
 
     private void getVideo(float partialTicks) {
         // Check that the video producer and frame type match - eg if this is a
@@ -316,7 +321,7 @@ public class VideoHook {
                     this.videoProducer.getFrame(this.missionInit, this.buffer);
                     this.buffer.get(data); // Avoiding copy not simple as data is kept & written to a stream later.
                     time_after_render_ns = System.nanoTime();
-                    envServer.addFrame(data);
+                    addFrame(data);;
                 } else {
                     time_after_render_ns = System.nanoTime();
                 }
@@ -411,6 +416,15 @@ public class VideoHook {
         {
             // TODO Auto-generated catch block
             e.printStackTrace();
+        }
+    }
+
+    private void addFrame(byte[] data) {
+        if (!(videoProducer instanceof DepthProducerImplementation)) {
+            envServer.addFrame(data);
+        }
+        else {
+            envServer.addDepthFrame(data);
         }
     }
 }
