@@ -159,8 +159,8 @@ class Decoder3d(nn.Module):
         self.decoder = decoder
         self.minecraftHead = minecraftHead
 
-    def forward(self, x, camera_position, grid_origin):
-        return self.minecraftHead(self.decoder(x), camera_position, grid_origin)
+    def forward(self, x, camera_position, model_view_metrix, projection_metrix, grid_origin):
+        return self.minecraftHead(self.decoder(x), camera_position, model_view_metrix, projection_metrix, grid_origin)
 
 
 class Actor(nn.Module):

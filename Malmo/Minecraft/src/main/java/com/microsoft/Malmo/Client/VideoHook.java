@@ -24,12 +24,15 @@ import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
 
 import com.microsoft.Malmo.MissionHandlers.DepthProducerImplementation;
 import com.microsoft.Malmo.Utils.AddressHelper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.launchwrapper.Launch;
+import net.minecraft.util.math.Vec3d;
 import net.minecraftforge.client.event.RenderWorldLastEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
@@ -49,6 +52,7 @@ import com.microsoft.Malmo.Schemas.MissionDiagnostics.VideoData;
 import com.microsoft.Malmo.Schemas.MissionInit;
 import com.microsoft.Malmo.Utils.TCPSocketChannel;
 import com.microsoft.Malmo.Utils.TextureHelper;
+import org.lwjgl.opengl.GL11;
 
 
 /**
@@ -262,7 +266,8 @@ public class VideoHook {
      *            Contains information about the event (not used).
      */
     @SubscribeEvent
-    public void postRender(PostRenderEvent event) {
+//    public void postRender(PostRenderEvent event) { TODO use PostRenderEvent to get heand
+    public void postRender(RenderWorldLastEvent event) {
         if (videoProducer instanceof DepthProducerImplementation) {
             return;
         }
@@ -271,7 +276,7 @@ public class VideoHook {
     }
 
     @SubscribeEvent
-    public void postRender(RenderWorldLastEvent event) {
+    public void postRenderDepth(RenderWorldLastEvent event) {
         if (!(videoProducer instanceof DepthProducerImplementation)) {
             return;
         }
@@ -425,6 +430,15 @@ public class VideoHook {
         }
         else {
             envServer.addDepthFrame(data);
+
+            FloatBuffer mv = BufferUtils.createFloatBuffer(16);
+            FloatBuffer pr = BufferUtils.createFloatBuffer(16);
+
+            GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, pr);
+            GL11.glGetFloat(GL11.GL_MODELVIEW_MATRIX, mv);
+            GlStateManager.popMatrix();
+
+            envServer.addRenderMatrices(mv, pr);
         }
     }
 }

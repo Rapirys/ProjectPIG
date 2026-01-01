@@ -36,6 +36,9 @@ import net.minecraftforge.common.config.Configuration;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
 import java.nio.charset.Charset;
 import java.util.Hashtable;
 import java.util.LinkedList;
@@ -75,6 +78,11 @@ public class MalmoEnvServer implements IWantToQuit {
         double reward = 0.0;
         byte[] obs = null;
         byte[] depthObs = null;
+
+        // Render matrices aligned with the latest depthObs:
+        float[] modelViewMetrix = null;     // 16 floats, column-major OpenGL
+        float[] projectionMetrix = null;    // 16 floats, column-major OpenGL
+
         String info = "{}";
         byte[] worldState = null;
         LinkedList<String> commands = new LinkedList<String>();
@@ -83,7 +91,6 @@ public class MalmoEnvServer implements IWantToQuit {
     private static boolean envPolicy = false; // Are we configured by config policy?
 
     // Synchronize on EnvStateasd
-    
 
     private Lock lock = new ReentrantLock();
     private Condition cond = lock.newCondition();
@@ -147,7 +154,7 @@ public class MalmoEnvServer implements IWantToQuit {
                             checkHello(socket);
 
                             while (true) {
-                                
+
                                 DataInputStream din = new DataInputStream(socket.getInputStream());
                                 int hdr = 0;
                                 try {
@@ -375,6 +382,8 @@ public class MalmoEnvServer implements IWantToQuit {
         envState.commands.clear();
         envState.obs = null;
         envState.depthObs = null;
+        envState.modelViewMetrix = null;
+        envState.projectionMetrix = null;
         envState.info = "{}";
         envState.worldState = null;
 
@@ -453,6 +462,8 @@ public class MalmoEnvServer implements IWantToQuit {
         boolean done;
         byte[] obs;
         byte[] depthObs;
+        byte[] modelViewMetrix;
+        byte[] projectionMetrix;
         String info = "";
         byte[] worldState = null;
         boolean sent = true;
@@ -501,6 +512,8 @@ public class MalmoEnvServer implements IWantToQuit {
             // After which, get the observations.
             obs = getObservation(done);
             depthObs = getDepthObservation(done);
+            modelViewMetrix = packFloatArrayLE(envState.modelViewMetrix);
+            projectionMetrix = packFloatArrayLE(envState.projectionMetrix);
 
             // TimeHelper.SyncManager.debugLog("[MALMO_ENV_SERVER] <STEP> Observation received. Getting info.");
 
@@ -536,6 +549,8 @@ public class MalmoEnvServer implements IWantToQuit {
             previousEnvState.commands = envState.commands;
             previousEnvState.obs = envState.obs;
             previousEnvState.depthObs = envState.depthObs;
+            previousEnvState.modelViewMetrix = envState.modelViewMetrix;
+            previousEnvState.projectionMetrix = envState.projectionMetrix;
             previousEnvState.worldState = envState.worldState;
             previousEnvState.info = envState.info;
             previousEnvState.missionInit = envState.missionInit;
@@ -553,6 +568,8 @@ public class MalmoEnvServer implements IWantToQuit {
             envState.info = "{}";
             envState.obs = null;
             envState.depthObs = null;
+            envState.modelViewMetrix = null;
+            envState.projectionMetrix = null;
             envState.worldState  = null;
             envState.reward = 0.0;
 
@@ -570,6 +587,12 @@ public class MalmoEnvServer implements IWantToQuit {
 
         dout.writeInt(depthObs.length);
         dout.write(depthObs);
+
+        dout.writeInt(modelViewMetrix.length);
+        dout.write(modelViewMetrix);
+
+        dout.writeInt(projectionMetrix.length);
+        dout.write(projectionMetrix);
 
         dout.writeInt(BYTES_DOUBLE + 2);
         dout.writeDouble(reward);
@@ -663,6 +686,8 @@ public class MalmoEnvServer implements IWantToQuit {
         byte[] obs;
         byte[] depthObs;
         boolean done;
+        byte[] modelViewMetrix;
+        byte[] projectionMetrix;
         String info = "";
         byte[] worldState;
 
@@ -694,6 +719,8 @@ public class MalmoEnvServer implements IWantToQuit {
 
             obs = getObservation(false);
             depthObs = getDepthObservation(false);
+            modelViewMetrix = packFloatArrayLE(envState.modelViewMetrix);
+            projectionMetrix = packFloatArrayLE(envState.projectionMetrix);
 
             // TimeHelper.SyncManager.debugLog("[MALMO_ENV_SERVER] <PEEK> Observation acquired.");
             done = envState.done;
@@ -708,6 +735,12 @@ public class MalmoEnvServer implements IWantToQuit {
 
         dout.writeInt(depthObs.length);
         dout.write(depthObs);
+
+        dout.writeInt(modelViewMetrix.length);
+        dout.write(modelViewMetrix);
+
+        dout.writeInt(projectionMetrix.length);
+        dout.write(projectionMetrix);
 
         byte[] infoBytes = info.getBytes(utf8);
         dout.writeInt(infoBytes.length);
@@ -1004,6 +1037,29 @@ public class MalmoEnvServer implements IWantToQuit {
     public void addDepthFrame(byte[] frame) {
         envState.depthObs = frame;
     }
+
+    public void addRenderMatrices(FloatBuffer mv, FloatBuffer pr) {
+        final float[] modelViewMetrics = new float[16];
+        final float[] projectionMetrics = new float[16];
+
+        mv.rewind();
+        mv.get(modelViewMetrics);
+        pr.rewind();
+        pr.get(projectionMetrics);
+
+        envState.modelViewMetrix = modelViewMetrics;
+        envState.projectionMetrix = projectionMetrics;
+    }
+
+
+    private static byte[] packFloatArrayLE(float[] a) {
+        if (a == null) return new byte[0];
+        //TODO move conversion before addRenderMatrices
+        ByteBuffer bb = ByteBuffer.allocate(a.length * 4).order(ByteOrder.LITTLE_ENDIAN);
+        bb.asFloatBuffer().put(a);
+        return bb.array();
+    }
+
 
 
     public void notifyIntegrationServerStarted(int integrationServerPort) {

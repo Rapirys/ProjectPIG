@@ -34,6 +34,7 @@ class GymPixelsProcessingWrapper(gym.ObservationWrapper):
 
     def observation(self, observation):
         observation = np.transpose(observation, (2, 0, 1))/255.0
+        observation = observation[:, ::-1, :].copy() #TODO redundant copy
         return observation
     
 class CleanGymWrapper(gym.Wrapper):
@@ -119,11 +120,13 @@ class ResizeInfoDepth(gym.Wrapper):
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         info["depth"] = cv2.resize(info["depth"], (obs.shape[1], obs.shape[0]), interpolation=cv2.INTER_AREA)[None, ...]
+        info["depth"] = info["depth"][:, ::-1, :].copy()  # TODO redundant copy
         return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         info["depth"] = cv2.resize(info["depth"], (obs.shape[1], obs.shape[0]), interpolation=cv2.INTER_AREA)[None, ...]
+        info["depth"] = info["depth"][:, ::-1, :].copy()  # TODO redundant copy
         return obs, reward, terminated, truncated, info
 
 

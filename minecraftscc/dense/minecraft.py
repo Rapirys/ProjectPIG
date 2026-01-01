@@ -1,12 +1,8 @@
-import torch
 from torch import nn
 
 from minecraftscc.dense.monoscene import FLoSP, SegmentationHead, UNet3D
-from minecraftscc.dense.utils import (
-    vox2pix,
-    intrinsics_from_fov,
-    extrinsics_from_player_position,
-)
+from minecraftscc.dense.utils import vox2pix
+
 
 
 class MinecraftSegmentationHead(nn.Module):
@@ -28,7 +24,6 @@ class MinecraftSegmentationHead(nn.Module):
         self.img_W = observationShape[1]
         self.img_H = observationShape[2]
         self.fov = config.minecraft.fov
-        self.cam_K = intrinsics_from_fov(self.img_W, self.img_H, self.fov, self.fov, device)
 
 
         self.config = config
@@ -47,9 +42,9 @@ class MinecraftSegmentationHead(nn.Module):
             # Minecraft completion head
         )
 
-    def forward(self, x, camera_position, grid_origin):
-        cam_E = extrinsics_from_player_position(camera_position, device=self.device)
-        projected_pix, fov_mask, _, _ = vox2pix(cam_E, self.cam_K, grid_origin, self.img_W, self.img_H, self.scene_size)
+    def forward(self, x, camera_position, model_view_metrix, projection_metrix, grid_origin):
+        #TODO apply camera_position
+        projected_pix, fov_mask, _, _ = vox2pix(model_view_metrix, projection_metrix, grid_origin, self.img_W, self.img_H, self.scene_size)
         out = self.network((x, projected_pix, fov_mask))
         return out, fov_mask
 
