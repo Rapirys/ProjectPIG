@@ -11,14 +11,16 @@ from torch.distributions import kl_divergence, Independent, OneHotCategoricalStr
 from buffer import ReplayBuffer
 from malmoenv.world_tracking.utils import decode_world_update
 from minecraftscc.dense.loss import CE_ssc_loss
-from minecraftscc.dense.minecraft import MinecraftSegmentationHead, get_classes
-from minecraftscc.sparse.models import DepthMDNHead, gaussian_mdn_nll_loss
+from minecraftscc.dense.minecraft import MinecraftSegmentationHead
+from minecraftscc.sparse.losses import sparse_ce_loss
+from minecraftscc.sparse.minecraft import SparseMinecraftSegmentationHead
+from minecraftscc.sparse.models import DepthMDNHead, lognormal_mdn_nll_loss
 from minecraftscc.utils import (
-    build_globalid_to_blockid_lut, projection_matrices_from_info, extract_camera_position_from_info,
+    build_globalid_to_blockid_lut, projection_matrices_from_info, extract_camera_position_from_info, get_classes,
 )
 from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, EncoderConv, DecoderConv, \
     Critic, \
-    HybridActor, Decoder3d, DecoderDepth
+    HybridActor, Decoder3d, DecoderDepth, Decoder3dSparse
 from utils import computeLambdaValues, Moments, collapse_world_updates
 
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -53,7 +55,7 @@ class Dreamer:
         self.posteriorNet    = PosteriorNet(config.recurrentSize + config.encodedObsSize, config.latentLength, config.latentClasses, config.posteriorNet   ).to(self.device)
         self.rewardPredictor = RewardModel(self.fullStateSize,                                                                       config.reward         ).to(self.device)
 
-        self.buffer         = ReplayBuffer(observationShape, self.actionSize, config, device)
+        self.buffer         = ReplayBuffer(observationShape, self.actionSize, config, device, self.use_3d_predictions)
         self.valueMoments   = Moments(device)
 
         self.block_state_registry = None
@@ -68,21 +70,30 @@ class Dreamer:
                 decoder3d,
                 MinecraftSegmentationHead(self.config, self.device, self.observationShape, self.classes).to(self.device)
             )
-            self.minecraftHeadOptimiser = torch.optim.Adam(self.minecraftSegmentationHead.parameters(),
-                                                           self.config.worldModelLR)
+            self.minecraftHeadOptimiser = torch.optim.Adam(self.minecraftSegmentationHead.parameters(),self.config.worldModelLR)
+
+        if (self.use_3d_predictions == 'sparse'):
+            decoder3d = DecoderConv(
+                self.fullStateSize, [config.minecraft.prediction_head.feature_size, self.config.resolution[0], self.config.resolution[1]],
+                config.decoder #TODO feature_size is under questions, especially if we increase the resolution
+            ).to(self.device)
+            self.minecraftSegmentationHead = Decoder3dSparse(
+                decoder3d,
+                SparseMinecraftSegmentationHead(self.config, self.device, self.classes).to(self.device)
+            )
         # if (self.use_3d_predictions == 'sparse'):
         decoderDepth = DecoderConv(
                  self.fullStateSize, [config.depth.feature_size, self.config.resolution[0], self.config.resolution[1]],
                  config.decoder #TODO feature_size is under questions, especially if we increase the resolution
             )
-        self.depthPredictionHead = DecoderDepth(
-                decoderDepth,
-                DepthMDNHead(config.depth.feature_size)
-            ).to(self.device)
+        self.depthPredictionHead = DecoderDepth(decoderDepth, DepthMDNHead(config.depth.feature_size)).to(self.device)
 
         self.worldModelParameters = (list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.recurrentModel.parameters()) +
                                      list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()) +
                                      list(self.depthPredictionHead.parameters()))
+
+        if self.use_3d_predictions == "sparse":
+            self.worldModelParameters += list(self.minecraftSegmentationHead.parameters())
 
         self.worldModelOptimizer    = torch.optim.Adam(self.worldModelParameters,   lr=self.config.worldModelLR)
         self.actorOptimizer         = torch.optim.Adam(self.actor.parameters(),     lr=self.config.actorLR)
@@ -111,8 +122,8 @@ class Dreamer:
         previousLatentState = torch.zeros(self.config.batchSize, self.latentSize, device=self.device)
 
         recurrentStates, priorsLogits, posteriors, posteriorsLogits = [], [], [], []
-        reconstruction3DLoss = 0
-        reconstruction3D_CE = 0.0
+        reconstruction3DLoss = torch.tensor(0.0, device=self.device)
+        reconstruction3D_CE = torch.tensor(0.0, device=self.device)
         for t in range(1, self.config.batchLength):
             first_t = data.is_first[:, t].float()
 
@@ -170,15 +181,55 @@ class Dreamer:
         posteriorsLogits            = torch.stack(posteriorsLogits,             dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
         fullStates                  = torch.cat((recurrentStates, posteriors), dim=-1) # (batchSize, batchLength-1, recurrentSize + latentLength*latentClasses)
 
+        B = self.config.batchSize
+        T = self.config.batchLength - 1
         fullStatesTransformedBatch = fullStates.view(-1, self.fullStateSize)
-        reconstructionMeans = self.decoder(fullStatesTransformedBatch).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
-        reconstructionMeans = reconstructionMeans
+        reconstructionMeans = self.decoder(fullStatesTransformedBatch).view(B, T, *self.observationShape)
         reconstructionLoss = -Normal(reconstructionMeans, 1.0).log_prob(data.observations[:, 1:]).mean() - 0.9189
 
         depthPrediction = self.depthPredictionHead(fullStatesTransformedBatch)
-        depthGroundTruth = data.depths[:, 1:].view(-1, *self.observationShape)
-        depthPredictionLoss = gaussian_mdn_nll_loss(*depthPrediction, depthGroundTruth) - 0.9189
+        depthGroundTruth = data.depths[:, 1:].reshape(-1, *self.observationShape)
+        depthPredictionLoss = lognormal_mdn_nll_loss(*depthPrediction, depthGroundTruth) - 0.9189
 
+        sparse_3d_ce_loss = torch.tensor(0.0, device=self.device)
+        if self.use_3d_predictions == "sparse":
+            depth_mixture_weights, depth_component_means, depth_component_scales = depthPrediction
+            camera_position = data.camera_position[:, 1:].reshape(-1, data.camera_position.size(-1))
+            model_view_metrix = data.model_view_metrix[:, 1:].reshape(-1, *data.model_view_metrix.shape[2:])
+            projection_metrix = data.projection_metrix[:, 1:].reshape(-1, *data.projection_metrix.shape[2:])
+
+            sparse_targets_xyz = torch.as_tensor(data.sparse_targets["coords"][:, 1:], device=self.device)
+            sparse_targets_valid = torch.as_tensor(data.sparse_targets["valid_mask"][:, 1:], device=self.device)
+
+            max_targets = sparse_targets_xyz.shape[2]
+            sparse_targets_xyz = sparse_targets_xyz.reshape(B * T, max_targets, 4)
+            sparse_targets_valid = sparse_targets_valid.reshape(B * T, max_targets)
+
+            target_xyz_world, target_labels = sparse_targets_xyz[..., :3],  sparse_targets_xyz[..., 3]
+
+             # Build (batch_time, x, y, z) for SparseMinecraftSegmentationHead
+            batch_time_ids = torch.arange(B * T, device=self.device, dtype=torch.int32)[:, None].expand(-1, max_targets)
+            batch_time_ids = batch_time_ids[sparse_targets_valid]           # [Q]
+            target_xyz_world = target_xyz_world[sparse_targets_valid]       # [Q,3]
+            target_labels = target_labels[sparse_targets_valid]             # [Q]
+
+            target_coords_world = torch.cat([batch_time_ids[:, None], target_xyz_world], dim=1)  # [Q,4]
+
+            # Forward returns logits only: [Q, num_classes]
+            logits = self.minecraftSegmentationHead(
+                fullStatesTransformedBatch,
+                depth_mixture_weights.detach(),
+                depth_component_means.detach(),
+                depth_component_scales.detach(),
+                camera_position,
+                model_view_metrix,
+                projection_metrix,
+                target_coords_world,
+            )
+
+            sparse_3d_ce_loss = sparse_ce_loss(logits, target_labels)
+
+        
         rewardDistribution  =  self.rewardPredictor(fullStates)
         rewardLoss          = -rewardDistribution.log_prob(data.rewards[:, 1:].squeeze(-1)).mean()
 
@@ -194,12 +245,13 @@ class Dreamer:
         priorLoss       = self.config.betaPrior*torch.maximum(priorLoss, freeNats)
         posteriorLoss   = self.config.betaPosterior*torch.maximum(posteriorLoss, freeNats)
         klLoss          = (priorLoss + posteriorLoss).mean()
-        reconstruction3DLoss = reconstruction3DLoss / (self.config.batchLength - 1)
-        reconstruction3D_CE = reconstruction3D_CE / (self.config.batchLength - 1)
+        reconstruction3DLoss = reconstruction3DLoss / T
+        reconstruction3D_CE = reconstruction3D_CE / T
 
         worldModelLoss =  self.config.reconstructionLossCoefficient * reconstructionLoss +\
                           self.config.reconstruction3DLossCoefficient * reconstruction3DLoss + rewardLoss + klLoss +\
-                          self.config.depthPredictionLossCoefficient * depthPredictionLoss
+                          self.config.depthPredictionLossCoefficient * depthPredictionLoss +\
+                          self.config.reconstruction3DLossCoefficient *  sparse_3d_ce_loss
 
         self.worldModelOptimizer.zero_grad()
         worldModelLoss.backward()
@@ -211,7 +263,8 @@ class Dreamer:
             "worldModelLoss"        : worldModelLoss.item() - klLossShiftForGraphing,
             "reconstructionLoss"    : reconstructionLoss.item(),
             "depthPredictionLoss"   :   depthPredictionLoss.item(),
-            "reconstruction3DLoss"  : reconstruction3D_CE.item() if enable3dLoss else 0,
+            "reconstruction3DLoss"  : reconstruction3D_CE.item(),
+            "sparse_3d_ce_loss"     : sparse_3d_ce_loss.item(),
             "rewardPredictorLoss"   : rewardLoss.item(),
             "klLoss"                : klLoss.item() - klLossShiftForGraphing}
         return fullStates.view(-1, self.fullStateSize).detach(), metrics

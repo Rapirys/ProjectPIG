@@ -1,17 +1,16 @@
-import math
-import time
-
-import gymnasium as gym
-import torch
 import argparse
+import math
 import os
 
+import torch
 from torch.backends import cudnn
 from tqdm.auto import tqdm  # add
-from dreamer    import Dreamer
-from utils      import loadConfig, seedEverything, plotMetrics, _now_sync
-from envs import getEnvProperties, GymPixelsProcessingWrapper, CleanGymWrapper, make_env
-from utils      import saveLossesToCSV, ensureParentFolders
+
+from dreamer import Dreamer
+from envs import getEnvProperties, make_env
+from utils import loadConfig, seedEverything, plotMetrics
+from utils import saveLossesToCSV, ensureParentFolders
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True

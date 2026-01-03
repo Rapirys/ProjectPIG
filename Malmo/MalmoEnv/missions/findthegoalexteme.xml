@@ -45,12 +45,12 @@
 <!--                <Height>64</Height>-->
 <!--                <Width>640</Width>-->
 <!--                <Height>360</Height>-->
-                <Width>360</Width>
-                <Height>360</Height>
+                <Width>64</Width>
+                <Height>64</Height>
             </VideoProducer>
             <DepthProducer>
-                <Width>360</Width>
-                <Height>360</Height>
+                <Width>64</Width>
+                <Height>64</Height>
             </DepthProducer>
 
             <ObservationFromBlocksStream/>

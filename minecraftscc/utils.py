@@ -87,3 +87,9 @@ def build_globalid_to_blockid_lut(block_state_registry, device=None):
             lut[m['global_id']] = bid
 
     return lut
+
+
+def get_classes(block_state_registry):
+    blocks = block_state_registry["blocks"]
+    blocks.sort(key=lambda b: b["block_id"])
+    return [len(block['metas']) for block in blocks]

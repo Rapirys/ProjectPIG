@@ -1,9 +1,9 @@
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Normal
+from torch.distributions import LogNormal
+
+from minecraftscc.sparse.data_preparation import lift_to_3d_by_depth
 
 
 class DepthMDNHead(nn.Module):
@@ -46,12 +46,43 @@ class DepthMDNHead(nn.Module):
         scale_log = params[:, 2]        # [N, K, H, W]
 
         mixture_weights = F.softmax(pi_logits, dim=1)
-        component_means = torch.exp(mean_log)  # log-depth -> positive depth
+        component_means = mean_log
         component_scales = F.softplus(scale_log) + self.min_scale
 
         return mixture_weights, component_means, component_scales
 
-def gaussian_mdn_nll_loss(
+
+class SparseFLoSPFromMDN(nn.Module):
+    def __init__(self, temperature: float = 0.7, eps: float = 1e-10):
+        super().__init__()
+        self.temperature = float(temperature)
+        self.eps = float(eps)
+
+    def forward(
+        self,
+        mixture_weights: torch.Tensor,     # [B, K, H, W]
+        component_means: torch.Tensor,     # [B, K, H, W]
+        component_scales: torch.Tensor,    # [B, K, H, W]
+        features: torch.Tensor,            # [B, C, H, W]
+        camera_position: torch.Tensor,     # [B,3] or [3]
+        model_view_metrix: torch.Tensor,   # [B,4,4]
+        projection_metrix: torch.Tensor,   # [4,4]
+    ):
+        log_pi = torch.log(mixture_weights.clamp_min(self.eps))              # [B,K,H,W]
+        assign = F.gumbel_softmax(log_pi, tau=self.temperature, hard=True, dim=1)
+
+        # Sample per-component log-depth, then select the sampled component
+        eps = torch.randn_like(component_means)  # [B,K,H,W]
+        log_depth = component_means + component_scales * eps      # [B,K,H,W]
+        depth = torch.exp((assign * log_depth).sum(dim=1))        # [B,H,W]
+        depth_samples = depth.unsqueeze(1)                                    # [B,1,H,W]
+
+        coords, feats = lift_to_3d_by_depth(depth_samples, features, camera_position, model_view_metrix, projection_metrix)
+
+        return coords, feats
+
+
+def lognormal_mdn_nll_loss(
     mixture_weights: torch.Tensor,
     component_means: torch.Tensor,
     component_scales: torch.Tensor,
@@ -59,12 +90,12 @@ def gaussian_mdn_nll_loss(
     min_prob: float = 1e-10,
 ) -> torch.Tensor:
     """
-    Negative log-likelihood for a per-pixel Gaussian mixture.
+    Negative log-likelihood for a per-pixel LogNormal mixture.
 
     Args:
         mixture_weights:  [N, K, H, W]  (softmax over K)
-        component_means:  [N, K, H, W]
-        component_scales: [N, K, H, W]  (sigma > 0)
+        component_means:  [N, K, H, W]  (mu of log-depth)
+        component_scales: [N, K, H, W]  (sigma of log-depth, > 0)
         depth_ground_truth: [N, 1, H, W] or [N, H, W]
         min_prob: clamp to keep log(.) stable
 
@@ -75,10 +106,13 @@ def gaussian_mdn_nll_loss(
     if depth.dim() == 3:
         depth = depth.unsqueeze(1)
 
-    # log N(d | mu_k, sigma_k^2) for each component k
-    log_component_pdf = Normal(component_means, component_scales).log_prob(depth)  # [N, K, H, W]
+    # LogNormal is defined for depth > 0; clamp to avoid -inf/NaN
+    depth = depth.clamp_min(min_prob)
+
+    # log LogNormal(d | mu_k, sigma_k^2) for each component k
+    log_component_pdf = LogNormal(component_means, component_scales).log_prob(depth)  # [N, K, H, W]
     # log pi_k
     log_weights = torch.log(mixture_weights.clamp_min(min_prob))  # [N, K, H, W]
-    # log Σ_k pi_k * N_k(d)  (stable)
+    # log Σ_k pi_k * LogNormal_k(d)  (stable)
     log_mixture_pdf = torch.logsumexp(log_weights + log_component_pdf, dim=1)  # [N, H, W]
     return (-log_mixture_pdf).mean()

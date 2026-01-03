@@ -156,22 +156,22 @@ public class VideoProducerImplementation extends HandlerBase implements IVideoPr
 
     private void getRGBFrame(ByteBuffer buffer)
     {
-        final int format = GL_RGB;
         final int width = this.videoParams.getWidth();
         final int height = this.videoParams.getHeight();
 
-        // Render the Minecraft frame into our own FBO, at the desired size:
+        Framebuffer mcFb = Minecraft.getMinecraft().getFramebuffer();
+        GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, mcFb.framebufferObject);
+        GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, this.fbo.framebufferObject);
+        GL30.glBlitFramebuffer(
+                0, 0, mcFb.framebufferWidth, mcFb.framebufferHeight,
+                0, 0, width, height,
+                GL11.GL_COLOR_BUFFER_BIT,
+                GL11.GL_NEAREST
+        );
+
         this.fbo.bindFramebuffer(true);
-        Minecraft.getMinecraft().getFramebuffer().framebufferRenderExt(width, height, true);
-        // Now read the pixels out from that:
-        // glReadPixels appears to be faster than doing:
-        // GlStateManager.bindTexture(this.fbo.framebufferTexture);
-        // GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, format, GL_UNSIGNED_BYTE,
-        // buffer);
-        glReadPixels(0, 0, width, height, format, GL_UNSIGNED_BYTE, buffer);
+        glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer);
         this.fbo.unbindFramebuffer();
-        GlStateManager.enableDepth();
-        Minecraft.getMinecraft().getFramebuffer().bindFramebuffer(true);
     }
 
     @Override

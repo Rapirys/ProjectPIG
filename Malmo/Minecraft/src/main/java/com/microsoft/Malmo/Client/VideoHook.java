@@ -331,6 +331,7 @@ public class VideoHook {
                     time_after_render_ns = System.nanoTime();
                 }
             } else {
+                //TODO - this is correct
                 // Get buffer ready for writing to:
                 this.buffer.clear();
                 this.headerbuffer.clear();
@@ -436,7 +437,6 @@ public class VideoHook {
 
             GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, pr);
             GL11.glGetFloat(GL11.GL_MODELVIEW_MATRIX, mv);
-            GlStateManager.popMatrix();
 
             envServer.addRenderMatrices(mv, pr);
         }

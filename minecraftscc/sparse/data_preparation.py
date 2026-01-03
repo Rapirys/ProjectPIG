@@ -4,47 +4,46 @@ import numpy as np
 import torch
 from typing import Tuple
 
-@torch.no_grad()
-def backproject_visible_blocks_from_depth(
-    depth_camera_z: torch.Tensor,   # [B,H,W] float32, camera-Z depth (+Z forward)
+
+def backproject_visible_points_from_depth(
+    depth_camera_z: torch.Tensor,   # [B,H,W]
     camera_position: torch.Tensor,  # [B,3] or [3]
     model_view_metrix: torch.Tensor,
     projection_metrix: torch.Tensor,
-    image_width: int,
-    image_height: int
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Returns MinkowskiEngine coords: int32 [N,4] = (batch, x, y, z) of first-hit blocks.
-    Pixel centers are used: (u+0.5, v+0.5).
+    Returns (dense, all pixels):
+        batch_ids:    [M]   int64, M = B*H*W
+        points_world:  [M,3]  float32
     """
     device = depth_camera_z.device
+    B, H, W = depth_camera_z.shape
+
     P = projection_metrix
     world_to_camera = model_view_metrix
     camera_to_world = torch.linalg.inv(world_to_camera)
+    P00, P11 = P[:, 0, 0].view(B, 1, 1) , P[:, 1, 1].view(B, 1, 1)
 
-    P00 = P[0, 0]
-    P11 = P[1, 1]
+    # integer pixel indices and centers
+    pix_y_int = torch.arange(H, device=device, dtype=torch.long)
+    pix_x_int = torch.arange(W, device=device, dtype=torch.long)
+    pix_y, pix_x = torch.meshgrid(pix_y_int, pix_x_int, indexing="ij")      # [H,W],[H,W]
 
-    pixel_y, pixel_x = torch.meshgrid(
-        torch.arange(image_height, device=device, dtype=torch.float32) + 0.5,
-        torch.arange(image_width,  device=device, dtype=torch.float32) + 0.5,
-        indexing="ij",
-    )  # [H,W], [H,W]
+    pix_y_center = pix_y.to(torch.float32) + 0.5
+    pix_x_center = pix_x.to(torch.float32) + 0.5
 
     depth = depth_camera_z.to(torch.float32)  # [B,H,W]
-    valid = torch.isfinite(depth) & (depth > 1e-12)
+    x_ndc = (pix_x_center / float(W)) * 2.0 - 1.0
+    y_ndc = 1.0 - (pix_y_center / float(H)) * 2.0
 
-    x_ndc = (pixel_x / float(image_width)) * 2.0 - 1.0          # [H,W]
-    y_ndc = 1.0 - (pixel_y / float(image_height)) * 2.0         # [H,W]
 
-    # --- OpenGL camera space (forward is -Z)
-    z_cam = -depth                                              # [B,H,W]
-    x_cam = -x_ndc[None] * z_cam / P00                           # [B,H,W]
-    y_cam = -y_ndc[None] * z_cam / P11                           # [B,H,W]
+       # OpenGL camera space (forward is -Z)
+    z_cam = -depth
+    x_cam = -x_ndc[None] * z_cam / P00
+    y_cam = -y_ndc[None] * z_cam / P11
     ones = torch.ones_like(z_cam)
 
-    points_camera_h = torch.stack([x_cam, y_cam, z_cam, ones], dim=-1).view(depth.shape[0], -1, 4)  # [B,HW,4]
-    valid_flat = valid.view(depth.shape[0], -1)
+    points_camera_h = torch.stack([x_cam, y_cam, z_cam, ones], dim=-1).view(B, -1, 4)  # [B,HW,4]
 
     points_world = points_camera_h @ camera_to_world.transpose(1, 2)          # [B,HW,4]
     points_world_xyz = points_world[..., :3]                                  # [B,HW,3]
@@ -53,16 +52,13 @@ def backproject_visible_blocks_from_depth(
         camera_position = camera_position.unsqueeze(0)                        # [1,3]
     points_world_xyz = points_world_xyz + camera_position[:, None, :]         # [B,HW,3]
 
-    camera_world_xyz = camera_to_world[:, :3, 3].unsqueeze(1)                 # [B,1,3]
-    points_world_xyz = points_world_xyz - 1e-4 * torch.nn.functional.normalize(points_world_xyz - camera_world_xyz, dim=2) #Step Bias along the viewing ray
-    block_xyz = torch.floor(points_world_xyz).to(torch.int32)                 # [B,HW,3]
-    batch_ids = torch.arange(depth.shape[0], device=device, dtype=torch.int32)[:, None].expand_as(valid_flat)
-    coords = torch.cat([batch_ids[valid_flat][:, None], block_xyz[valid_flat]], dim=1)  # [N,4]
+    # flatten
+    points_world_flat = points_world_xyz.reshape(B * H * W, 3)              # [M,3]
+    batch_ids = torch.arange(B, device=device, dtype=torch.long).repeat_interleave(H * W)
 
-    return torch.unique(coords, dim=0)
+    return batch_ids, points_world_flat
 
 
-@torch.no_grad()
 def halo_around_visible_blocks_torch(
     visible_coords: torch.Tensor,                 # [N,4] int32 (batch,x,y,z)
     halo_size: Tuple[int, int, int] = (5, 5, 5) # (sx,sy,sz), includes center
@@ -88,23 +84,62 @@ def halo_around_visible_blocks_torch(
     halo_coords = torch.cat([halo_b, halo_xyz], dim=2).reshape(-1, 4) # [N*Q,4]
     return halo_coords
 
+def backproject_visible_blocks_from_depth(
+    depth_camera_z: torch.Tensor,   # [B,H,W]
+    camera_position: torch.Tensor,  # [B,3] or [3]
+    model_view_metrix: torch.Tensor,
+    projection_metrix: torch.Tensor,
+) -> torch.Tensor | Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Returns MinkowskiEngine coords: int32 [N,4] = (batch, x, y, z) of first-hit blocks.
+    Pixel centers are used: (u+0.5, v+0.5).
+    """
+    world_to_camera = model_view_metrix
+    camera_to_world = torch.linalg.inv(world_to_camera)
 
+    batch_ids, points_world_xyz = backproject_visible_points_from_depth(
+        depth_camera_z,
+        camera_position,
+        model_view_metrix,
+        projection_metrix
+    )  # batch_ids:[M], points_world_xyz:[M,3]
+
+    # ensure camera_position is [B,3]
+    if camera_position.dim() == 1:
+        camera_position = camera_position.unsqueeze(0).expand(world_to_camera.shape[0], -1)
+    camera_pos_for_points = camera_position[batch_ids.long()]             # [M,3]
+
+    camera_world_xyz = camera_to_world[:, :3, 3]                       # [B,3]
+    camera_world_for_points = camera_world_xyz[batch_ids.long()]       # [M,3]
+
+    # 1) go to local camera frame by subtracting global offset, then subtract local camera center
+    directions = (points_world_xyz - camera_pos_for_points) - camera_world_for_points  # [M,3]
+    directions = torch.nn.functional.normalize(directions, dim=1)
+    points_world_xyz = points_world_xyz - 1e-4 * directions            # step bias
+
+    block_xyz = torch.floor(points_world_xyz).to(torch.int32)          # [M,3]
+    batch_ids_int = batch_ids.to(torch.int32)
+    coords = torch.cat([batch_ids_int[:, None], block_xyz], dim=1)     # [M,4]
+
+    return torch.unique(coords, dim=0, return_inverse=True)
+
+
+
+@torch.no_grad()
 def visible_blocks_with_halo_numpy(
     depth_camera_z: torch.Tensor,   # [B,H,W]
     camera_position: torch.Tensor,
     model_view_metrix: torch.Tensor,
     projection_metrix: torch.Tensor,
-    image_width: int,
-    image_height: int,
-    halo_size: Tuple[int, int, int] = (3, 3, 3),
+    halo_size: Tuple[int, int, int] = (1, 1, 1),
 ) -> Tuple[np.ndarray, np.ndarray]:
     B = depth_camera_z.shape[0]
     if model_view_metrix.ndim == 2:
         model_view_metrix = model_view_metrix.unsqueeze(0).expand(B, -1, -1).contiguous()
+    if projection_metrix.ndim == 2:
+        projection_metrix = projection_metrix.unsqueeze(0).expand(B, -1, -1).contiguous()
 
-    visible_coords = backproject_visible_blocks_from_depth(
-        depth_camera_z, camera_position, model_view_metrix, projection_metrix, image_width, image_height,
-    )
+    visible_coords, _ = backproject_visible_blocks_from_depth(depth_camera_z, camera_position, model_view_metrix, projection_metrix)
     halo_coords = halo_around_visible_blocks_torch(visible_coords, halo_size=halo_size)  # torch [N*Q,4]
 
     all_coords, inv = torch.unique(torch.cat([visible_coords, halo_coords], dim=0), dim=0, return_inverse=True)
@@ -118,4 +153,45 @@ def visible_blocks_with_halo_numpy(
         direct_mask.cpu().numpy()
     )
 
-# -0.83867055, -0.028504208, -0.5438926, 0.0, 0.0, 0.9986295, -0.05233596, 0.0, 0.54463905, -0.043892626, -0.83752114, 0.0, 0.0, -1.5378894, 0.13059738, 1.0
+def lift_to_3d_by_depth(
+    depth_samples: torch.Tensor,       # [B, N, H, W]
+    features: torch.Tensor,            # [B, C, H, W]
+    camera_position: torch.Tensor,     # [B,3]
+    model_view_metrix: torch.Tensor,   # [B,4,4]
+    projection_metrix: torch.Tensor,   # [4,4]
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Sparse FLoSP-like projection.
+
+    Args:
+        depth_samples: (B, N, H, W) camera-Z depths.
+        features:      (B, C, H, W) 2D features (shared across N per pixel).
+
+    Returns:
+        coords: (M, 4) int32 MinkowskiEngine coords (batch, x, y, z)
+        feats:  (M, C) float32 features, summed over all samples that map to same coord
+    """
+    B, N, H, W = depth_samples.shape
+    C = features.shape[1]
+
+    depth_flat = depth_samples.view(B * N, H, W)                       # [B*N,H,W]
+    camera_position_flat = camera_position.repeat_interleave(N, dim=0)  # [B*N,3]
+    model_view_flat = model_view_metrix.repeat_interleave(N, dim=0)   # [B*N,4,4]
+
+    coords, inv = backproject_visible_blocks_from_depth(
+        depth_flat,
+        camera_position_flat,
+        model_view_flat,
+        projection_metrix,
+    )  # coords:[M,4], inv:[B*N*H*W]
+
+    # features: [B,C,H,W] -> [B,H,W,C]
+    feats_img = features.permute(0, 2, 3, 1)  # [B,H,W,C]
+    feats_view = feats_img.unsqueeze(1).expand(B, N, H, W, C)
+    feats_flat = feats_view.reshape(B * N * H * W, C)  # [B*N*H*W, C]
+
+    M = coords.shape[0]
+    feats = torch.zeros(M, C, device=features.device, dtype=features.dtype)
+    feats.index_add_(0, inv, feats_flat)                                  # sum over duplicates
+
+    return coords, feats

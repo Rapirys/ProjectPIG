@@ -48,7 +48,3 @@ class MinecraftSegmentationHead(nn.Module):
         out = self.network((x, projected_pix, fov_mask))
         return out, fov_mask
 
-def get_classes(block_state_registry):
-    blocks =block_state_registry["blocks"]
-    blocks.sort(key=lambda b: b["block_id"])
-    return [len(block['metas']) for block in blocks]

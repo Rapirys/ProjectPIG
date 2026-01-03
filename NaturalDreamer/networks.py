@@ -162,6 +162,25 @@ class Decoder3d(nn.Module):
     def forward(self, x, camera_position, model_view_metrix, projection_metrix, grid_origin):
         return self.minecraftHead(self.decoder(x), camera_position, model_view_metrix, projection_metrix, grid_origin)
 
+class Decoder3dSparse(nn.Module):
+    def __init__(self, decoder, minecraftHead):
+        super().__init__()
+        self.decoder = decoder
+        self.minecraftHead = minecraftHead
+
+    def forward(self,
+        full_state: torch.Tensor, # [B, F]  (recurrent+latent)
+        mixture_weights: torch.Tensor,      # [B, K, H, W]
+        component_means: torch.Tensor,      # [B, K, H, W]
+        component_scales: torch.Tensor,     # [B, K, H, W]
+        camera_position: torch.Tensor,      # [B, 3]
+        model_view_metrix: torch.Tensor,    # [B, 4, 4]
+        projection_metrix: torch.Tensor,
+        target_coords: torch.Tensor):
+
+        return self.minecraftHead(self.decoder(full_state), mixture_weights, component_means, component_scales, camera_position, model_view_metrix, projection_metrix, target_coords)
+
+
 
 class Actor(nn.Module):
     def __init__(self, inputSize, actionSize, actionLow, actionHigh, device, config):
