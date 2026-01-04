@@ -74,7 +74,8 @@ class Dreamer:
 
         if (self.use_3d_predictions == 'sparse'):
             decoder3d = DecoderConv(
-                self.fullStateSize, [config.minecraft.prediction_head.feature_size, self.config.resolution[0], self.config.resolution[1]],
+                self.fullStateSize, [config.minecraft.prediction_head.feature_size - config.depth.feature_size,
+                                     self.config.resolution[0], self.config.resolution[1]],
                 config.decoder #TODO feature_size is under questions, especially if we increase the resolution
             ).to(self.device)
             self.minecraftSegmentationHead = Decoder3dSparse(
@@ -187,7 +188,7 @@ class Dreamer:
         reconstructionMeans = self.decoder(fullStatesTransformedBatch).view(B, T, *self.observationShape)
         reconstructionLoss = -Normal(reconstructionMeans, 1.0).log_prob(data.observations[:, 1:]).mean() - 0.9189
 
-        depthPrediction = self.depthPredictionHead(fullStatesTransformedBatch)
+        depthPrediction, depth_features = self.depthPredictionHead(fullStatesTransformedBatch)
         depthGroundTruth = data.depths[:, 1:].reshape(-1, *self.observationShape)
         depthPredictionLoss = lognormal_mdn_nll_loss(*depthPrediction, depthGroundTruth) - 0.9189
 
@@ -217,6 +218,7 @@ class Dreamer:
 
             # Forward returns logits only: [Q, num_classes]
             logits = self.minecraftSegmentationHead(
+                depth_features,
                 fullStatesTransformedBatch,
                 depth_mixture_weights.detach(),
                 depth_component_means.detach(),

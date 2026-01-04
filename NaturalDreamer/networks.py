@@ -150,7 +150,8 @@ class DecoderDepth(nn.Module):
         self.depth_head = depth_head
 
     def forward(self, x):
-        return self.depth_head(self.decoder(x))
+        features = self.decoder(x)
+        return self.depth_head(features), features
 
 
 class Decoder3d(nn.Module):
@@ -159,8 +160,9 @@ class Decoder3d(nn.Module):
         self.decoder = decoder
         self.minecraftHead = minecraftHead
 
-    def forward(self, x, camera_position, model_view_metrix, projection_metrix, grid_origin):
-        return self.minecraftHead(self.decoder(x), camera_position, model_view_metrix, projection_metrix, grid_origin)
+    def forward(self, depth_features, x, camera_position, model_view_metrix, projection_metrix, grid_origin):
+        features = torch.cat([depth_features, self.decoder(x)], dim=1)
+        return self.minecraftHead(features, camera_position, model_view_metrix, projection_metrix, grid_origin)
 
 class Decoder3dSparse(nn.Module):
     def __init__(self, decoder, minecraftHead):
@@ -169,6 +171,7 @@ class Decoder3dSparse(nn.Module):
         self.minecraftHead = minecraftHead
 
     def forward(self,
+        depth_features: torch.Tensor,
         full_state: torch.Tensor, # [B, F]  (recurrent+latent)
         mixture_weights: torch.Tensor,      # [B, K, H, W]
         component_means: torch.Tensor,      # [B, K, H, W]
@@ -177,8 +180,8 @@ class Decoder3dSparse(nn.Module):
         model_view_metrix: torch.Tensor,    # [B, 4, 4]
         projection_metrix: torch.Tensor,
         target_coords: torch.Tensor):
-
-        return self.minecraftHead(self.decoder(full_state), mixture_weights, component_means, component_scales, camera_position, model_view_metrix, projection_metrix, target_coords)
+        features = torch.cat([depth_features, self.decoder(full_state)], dim=1)
+        return self.minecraftHead(features, mixture_weights, component_means, component_scales, camera_position, model_view_metrix, projection_metrix, target_coords)
 
 
 

@@ -1,5 +1,7 @@
+--extra-index-url https://download.pytorch.org/whl/cu126
+
 gymnasium[box2d,other]==1.2.0
-torch==2.8.0
+torch==2.7.0
 numpy==2.3.2
 imageio==2.37.0
 pandas==2.3.1
@@ -8,4 +10,4 @@ attridict==0.0.9
 lxml
 pillow
 tqdm
-spconv-cu120
+spconv-cu126 @ https://github.com/MrForExample/Comfy3D_Pre_Builds/raw/main/_Build_Wheels/_Wheels_linux_py312_torch2.7.0_cu128/spconv_cu126-2.3.8-cp312-cp312-manylinux_2_28_x86_64.whl

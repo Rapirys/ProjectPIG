@@ -1,33 +1,34 @@
 environmentName: Minecraft
-runName: Minecraft-Training-Attempt-13
+runName: Minecraft-Training-Attempt-15
 seed: 1
 
 gradientSteps: 60000
-envStepsPerTrainingStep: 32 #batchSize*batchLength/ number
+envStepsPerTrainingStep: 16 #replay_ratio = batchSize*batchLength/ envStepsPerTrainingStep
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
 checkpointInterval: 250
 resume: False
-checkpointToLoad: 250
-#
-episodesBeforeStart: 1
+checkpointToLoad: 750
+episodesBeforeStart: 0
 numInteractionEpisodes: 1
 numEvaluationEpisodes: 1
 
 
 dreamer:
   actionRepeat: 1
-  batchSize: 12
-  batchLength: 56
+  batchSize: 16
+  batchLength: 32
   imaginationHorizon: 16
 
   recurrentSize: 8192 #1024*8
-  latentLength: 32 #32
-  latentClasses: 64 #64
+  latentLength: 32
+  latentClasses: 64
   encodedObsSize: 4096
 #  resolution: [256, 448]
 #  resolution: [160, 368]
   resolution: [ 64, 64 ]
+#  resolution: [ 180, 180 ]
+  use_3d_predictions: 'sparse'
 
   actorLR: 0.00004
   criticLR: 0.0001
@@ -35,6 +36,7 @@ dreamer:
   gradientNormType: 2
   gradientClip: 100
   reconstructionLossCoefficient: 4096
+  depthPredictionLossCoefficient: 256
   reconstruction3DLossCoefficient: 16
 
   discount: 0.997
@@ -60,6 +62,9 @@ dreamer:
     stride: 2
     kernelSize: 4
     activation: ReLU
+
+  depth:
+    feature_size: 32
 
   recurrentModel:
     hiddenSize: 1024
@@ -99,13 +104,15 @@ dreamer:
     activation: ReLU
 
   minecraft:
-    fov: 90
+    render_distance: 4
+    fov: 110 #TODO remove fov setting
+    max_target_blocks_3d: 4096
     classes: 236
     scene_size: [20, 16, 20]
     projection_scale: 1
     prediction_head:
       dilations: [1, 2, 3]
-      feature_size: 64 #64
+      feature_size: 96 #64
 
 
 

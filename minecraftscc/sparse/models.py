@@ -27,7 +27,7 @@ class DepthMDNHead(nn.Module):
         # Light refinement of decoder features before prediction.
         self.refine = nn.Sequential(
             nn.Conv2d(input_channels, input_channels, kernel_size=3, padding=1),
-            nn.GroupNorm(num_groups=32, num_channels=input_channels),
+            nn.GroupNorm(num_groups=16, num_channels=input_channels),
             nn.SiLU(),
         )
 
