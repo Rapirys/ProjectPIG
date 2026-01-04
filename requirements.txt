@@ -10,4 +10,4 @@ attridict==0.0.9
 lxml
 pillow
 tqdm
-spconv-cu126
+spconv-cu120
