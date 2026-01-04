@@ -130,7 +130,7 @@ public abstract class MixinMinecraftGameloop {
             TimeHelper.SyncManager.clientTick.awaitRequest(true);
 
 
-            this.timer.renderPartialTicks = 0;
+            this.timer.renderPartialTicks = 1;
 
             this.mcProfiler.endSection();
             this.mcProfiler.startSection("syncTickEventPre");

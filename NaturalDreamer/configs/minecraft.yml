@@ -1,34 +1,43 @@
 environmentName: Minecraft
-runName: Minecraft-Test-Run
+runName: Minecraft-Training-Attempt-15
 seed: 1
 
 gradientSteps: 60000
-replayRatio: 200
+envStepsPerTrainingStep: 32 #batchSize*batchLength/ number
 saveMetrics: True        # Saves metrics at replayRatio interval
 saveCheckpoints: True
-checkpointInterval: 500
+checkpointInterval: 250
 resume: False
-checkpointToLoad: 50k
-
-episodesBeforeStart: 10
+checkpointToLoad: 750
+episodesBeforeStart: 0
 numInteractionEpisodes: 1
 numEvaluationEpisodes: 1
 
+
 dreamer:
-  batchSize: 32
-  batchLength: 64
-  imaginationHorizon: 15
+  actionRepeat: 1
+  batchSize: 8
+  batchLength: 8
+  imaginationHorizon: 16
 
   recurrentSize: 512 #1024*8
   latentLength: 16 #32
   latentClasses: 16 #64
   encodedObsSize: 1024
+#  resolution: [256, 448]
+#  resolution: [160, 368]
+  resolution: [ 64, 64 ]
+#  resolution: [ 180, 180 ]
+  use_3d_predictions: 'sparse'
 
   actorLR: 0.00004
   criticLR: 0.0001
-  worldModelLR: 0.0002
+  worldModelLR: 0.0006
   gradientNormType: 2
   gradientClip: 100
+  reconstructionLossCoefficient: 4096
+  depthPredictionLossCoefficient: 256
+  reconstruction3DLossCoefficient: 16
 
   discount: 0.997
   lambda_: 0.95
@@ -38,55 +47,74 @@ dreamer:
   entropyScale: 0.0003
 
   buffer:
-    capacity: 50000
+    capacity: 15000 #TODO Bigger buffer in real training
+    minecraft:
+      scene_size: [20, 16, 20]
 
   encoder:
     depth: 16
     stride: 2
     kernelSize: 4
-    activation: Tanh
+    activation: ReLU
 
   decoder:
     depth: 16
     stride: 2
-    kernelSize: 5
-    activation: Tanh
+    kernelSize: 4
+    activation: ReLU
+
+  depth:
+    feature_size: 16
 
   recurrentModel:
-    hiddenSize: 200
-    activation: Tanh
+    hiddenSize: 256
+    numBlocks: 4
+    activation: ReLU
 
   priorNet:
-    hiddenSize: 200
+    hiddenSize: 256
     numLayers: 2
-    activation: Tanh
+    activation: ReLU
     uniformMix: 0.01
 
   posteriorNet:
-    hiddenSize: 200
+    hiddenSize: 256
     numLayers: 2
-    activation: Tanh
+    activation: ReLU
     uniformMix: 0.01
 
   reward:
-    hiddenSize: 400
+    hiddenSize: 256
     numLayers: 2
-    activation: Tanh
+    activation: ReLU
 
   continuation:
-    hiddenSize: 400
+    hiddenSize: 256
     numLayers: 3
-    activation: Tanh
+    activation: ReLU
 
   actor:
-    hiddenSize: 400
+    hiddenSize: 256
     numLayers: 2
-    activation: Tanh
+    activation: ReLU
 
   critic:
-    hiddenSize: 400
+    hiddenSize: 256
     numLayers: 3
-    activation: Tanh
+    activation: ReLU
+
+  minecraft:
+    render_distance: 4
+    fov: 110 #TODO remove fov setting
+    max_target_blocks_3d: 2048
+    classes: 236
+    scene_size: [20, 16, 20]
+    projection_scale: 1
+    prediction_head:
+      dilations: [1, 2, 3]
+      feature_size: 48 #64
+
+
 
 folderNames:
   metricsFolder: metrics

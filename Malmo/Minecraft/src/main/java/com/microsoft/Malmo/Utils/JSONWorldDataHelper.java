@@ -38,6 +38,7 @@ import net.minecraft.util.ResourceLocation;
 
 import net.minecraft.stats.StatList;
 import net.minecraft.stats.StatisticsManagerServer;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.biome.Biome;
 
 import javax.lang.model.element.Element;
@@ -194,6 +195,11 @@ public class JSONWorldDataHelper
         json.addProperty("zpos", player.posZ);
         json.addProperty("pitch",  player.rotationPitch);
         json.addProperty("yaw", player.rotationYaw);
+
+        Vec3d headPosition = player.getPositionEyes(1);
+        json.addProperty("xEyesPos",  headPosition.xCoord);
+        json.addProperty("yEyesPos",  headPosition.yCoord);
+        json.addProperty("zEyesPos", headPosition.zCoord);
     }
 
     /** Builds the player's biome data.

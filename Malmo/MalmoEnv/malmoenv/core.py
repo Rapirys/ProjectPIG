@@ -114,6 +114,9 @@ class Env:
         self.depth = 0
         self.reshape = reshape
         self.last_obs = None
+        self.last_depth = None
+        self.last_model_view_metrix = None
+        self.last_projection_metrix = None
         self.synchronous = True           # whether to use synchronous ticking
         self.seed_value = None  # optional per-episode seed
 
@@ -229,6 +232,13 @@ class Env:
     def _hello(sock):
         comms.send_message(sock, ("<MalmoEnv" + malmo_version + "/>").encode())
 
+    @staticmethod
+    def _decode_gl_matrix(raw_bytes: bytes) -> np.ndarray:
+        """Decode 16 float32 (little-endian) in OpenGL column-major order to (4,4) float32."""
+        if not raw_bytes:
+            return np.zeros((4, 4), dtype=np.float32)
+        a = np.frombuffer(raw_bytes, dtype=np.float32)
+        return a.reshape((4, 4), order="F")
 
     def reset(self, seed=None):
         """gym api reset"""
@@ -249,6 +259,9 @@ class Env:
     @retry
     def _start_up(self):
         self.last_obs = None
+        self.last_depth = None
+        self.last_model_view_metrix = None
+        self.last_projection_metrix = None
         self.resets += 1
 
         if self.role != 0:
@@ -263,19 +276,26 @@ class Env:
         return self._peek_obs()
 
     def _peek_obs(self):
-        """Initial observation fetch. New protocol returns obs, then info JSON, then done byte."""
+        """Initial observation fetch.
+        Protocol order (updated):
+          obs, depth, model_view, projection, info_json, world_state, done_byte
+        """
         obs = None
+        raw_depth = None
+        raw_mv = None
+        raw_pr = None
         malmo_info = "{}"
         world_state_bytes = None
         start_time = time.time()
-
-        # comms.send_message()
 
         while not self.done and (obs is None or len(obs) == 0):
             peek_message = "<Peek/>"
             comms.send_message(self.client_socket, peek_message.encode())
 
             obs = comms.recv_message(self.client_socket)
+            raw_depth = comms.recv_message(self.client_socket)
+            raw_mv = comms.recv_message(self.client_socket)
+            raw_pr = comms.recv_message(self.client_socket)
             malmo_info = comms.recv_message(self.client_socket).decode('utf-8')
             world_state_bytes = comms.recv_message(self.client_socket)
 
@@ -303,9 +323,28 @@ class Env:
         elif self.reshape:
             obs = obs.reshape((self.height, self.width, self.depth)).astype(np.uint8)
         self.last_obs = obs
+
+        # NEW: parse depth (DepthProducer is 32bpp float32 per pixel)
+        depth = np.frombuffer(raw_depth, dtype=np.float32) if raw_depth else np.array([], dtype=np.float32)
+        if self.reshape:
+            if depth.size:
+                depth = depth.reshape((self.height, self.width))
+            else:
+                depth = np.zeros((self.height, self.width), dtype=np.float32)
+            self.last_depth = depth
+
+        mv = self._decode_gl_matrix(raw_mv)
+        pr = self._decode_gl_matrix(raw_pr)
+        self.last_model_view_metrix = mv
+        self.last_projection_metrix = pr
+
         info = self._parse_malmo_info_dict(malmo_info)
         if world_state_bytes is not None:
             info["world_observation"] = world_state_bytes
+        info["depth"] = self.depth
+        info["depth_obs"] = depth
+        info["model_view_metrix"] = mv
+        info["projection_metrix"] = pr
         return obs, info
 
     def _quit_episode(self):
@@ -365,7 +404,11 @@ class Env:
                 np.zeros((self.height, self.width, self.depth), dtype=np.uint8) if self.reshape
                 else np.zeros(self.height * self.width * self.depth, dtype=np.uint8)
             )
-            return safe_obs, 0.0, True, "{}"
+            info = {}
+            info["depth"] = self.last_depth
+            info["model_view_metrix"] = self.last_model_view_metrix
+            info["projection_metrix"] = self.last_projection_metrix
+            return safe_obs, 0.0, True, info
 
         # Build and send StepClient message (include info; step_options==0)
         action_command = self.action_space[action] if not quit else " quit "
@@ -375,7 +418,11 @@ class Env:
         comms.send_message(self.client_socket, step_message.encode())
 
         # Receive observation frame
+        malmo_info = "{}"
         raw_obs = comms.recv_message(self.client_socket)
+        raw_depth = comms.recv_message(self.client_socket)
+        raw_mv = comms.recv_message(self.client_socket)
+        raw_pr = comms.recv_message(self.client_socket)
 
         # Receive reward/done/sent triple
         reply = comms.recv_message(self.client_socket)
@@ -383,7 +430,6 @@ class Env:
         self.done = (done_flag == 1)
 
         # Receive info JSON
-        malmo_info = "{}"
         if with_info:
             malmo_info = comms.recv_message(self.client_socket).decode('utf-8')
 
@@ -403,9 +449,26 @@ class Env:
                 obs = obs.reshape((self.height, self.width, self.depth)).astype(np.uint8)
         self.last_obs = obs
 
+        depth = np.frombuffer(raw_depth, dtype=np.float32) if raw_depth is not None else np.array([], dtype=np.float32)
+        if self.reshape:
+            if depth.size:
+                depth = depth.reshape((self.height, self.width))
+            else:
+                depth = np.zeros((self.height, self.width), dtype=np.float32)
+        self.last_depth = depth
+
+        mv = self._decode_gl_matrix(raw_mv)
+        pr = self._decode_gl_matrix(raw_pr)
+
+        self.last_model_view_metrix = mv
+        self.last_projection_metrix = pr
+
         info = self._parse_malmo_info_dict(malmo_info)
         if world_state_bytes is not None:
             info["world_observation"] = world_state_bytes
+        info["depth"] = depth
+        info["model_view_metrix"] = mv
+        info["projection_metrix"] = pr
 
         return obs, reward, self.done, info
 

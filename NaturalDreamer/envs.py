@@ -1,6 +1,7 @@
 import math
 from pathlib import Path
 
+import cv2
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.wrappers import TransformAction
@@ -33,6 +34,7 @@ class GymPixelsProcessingWrapper(gym.ObservationWrapper):
 
     def observation(self, observation):
         observation = np.transpose(observation, (2, 0, 1))/255.0
+        observation = observation[:, ::-1, :].copy() #TODO redundant copy
         return observation
     
 class CleanGymWrapper(gym.Wrapper):
@@ -111,29 +113,21 @@ class FlatDictActionSpace(gym.ActionWrapper):
 
 
 
-class MinecraftWrapper(gym.Wrapper):
+class ResizeInfoDepth(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
-        observation_space = self.observation_space
-        H, W, C = observation_space.shape
-        low = observation_space.low[..., :3]
-        high = observation_space.high[..., :3]
-        assert C == 4, ("depth is expected" if C == 3 else "")
-        self.observation_space = gym.spaces.Box(low=low, high=high, shape=(H, W, 3), dtype=observation_space.dtype)
-        self._rgb = np.s_[:, :, :3]
-        self._depth = np.s_[:, :, 3]
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
-        rgb, depth = obs[self._rgb], obs[self._depth]
-        info["depth"] = depth
-        return rgb, info
+        info["depth"] = cv2.resize(info["depth"], (obs.shape[1], obs.shape[0]), interpolation=cv2.INTER_AREA)[None, ...]
+        info["depth"] = info["depth"][:, ::-1, :].copy()  # TODO redundant copy
+        return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        rgb, depth = obs[self._rgb], obs[self._depth]
-        info["depth"] = depth
-        return rgb, reward, terminated, truncated, info
+        info["depth"] = cv2.resize(info["depth"], (obs.shape[1], obs.shape[0]), interpolation=cv2.INTER_AREA)[None, ...]
+        info["depth"] = info["depth"][:, ::-1, :].copy()  # TODO redundant copy
+        return obs, reward, terminated, truncated, info
 
 
 
@@ -178,10 +172,9 @@ def make_env(config):
             resync=0, reshape=True, )
 
         base = MalmoAdapter(base)
-        base = MinecraftWrapper(FlatDictActionSpace(base))
+        base = FlatDictActionSpace(base)
         eval_base = base
 
-    # TODO Different resize for minecraft
-    env = CleanGymWrapper(GymPixelsProcessingWrapper(gym.wrappers.ResizeObservation(base, resolution)))
-    env_eval = CleanGymWrapper(GymPixelsProcessingWrapper(gym.wrappers.ResizeObservation(eval_base, resolution)))
+    env = CleanGymWrapper(GymPixelsProcessingWrapper(ResizeInfoDepth(gym.wrappers.ResizeObservation(base, resolution))))
+    env_eval = CleanGymWrapper(GymPixelsProcessingWrapper(ResizeInfoDepth(gym.wrappers.ResizeObservation(eval_base, resolution))))
     return env, env_eval

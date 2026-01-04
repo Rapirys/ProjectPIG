@@ -1,26 +1,27 @@
-import cv2
-import torch
-import torch.nn as nn
-from torch import profiler
-from torch.distributions import kl_divergence, Independent, OneHotCategoricalStraightThrough, Normal
-import numpy as np
+import concurrent.futures
+import concurrent.futures
 import os
 
-import concurrent.futures
-
-from utils import symlog
-from minecraft.loss import CE_ssc_loss
-from minecraft.minecraft import MinecraftSegmentationHead, get_classes
-from minecraft.utils import (
-    extract_camera_position_from_info,
-    build_globalid_to_blockid_lut,
-)
-from malmoenv.world_tracking.utils import decode_world_update
-from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, ContinueModel, EncoderConv, DecoderConv, Actor, Critic, \
-    HybridActor
-from utils import computeLambdaValues, Moments, collapse_world_updates
-from buffer import ReplayBuffer
 import imageio
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.distributions import kl_divergence, Independent, OneHotCategoricalStraightThrough, Normal
+
+from buffer import ReplayBuffer
+from malmoenv.world_tracking.utils import decode_world_update
+from minecraftscc.dense.loss import CE_ssc_loss
+from minecraftscc.dense.minecraft import MinecraftSegmentationHead
+from minecraftscc.sparse.losses import sparse_ce_loss
+from minecraftscc.sparse.minecraft import SparseMinecraftSegmentationHead
+from minecraftscc.sparse.models import DepthMDNHead, lognormal_mdn_nll_loss
+from minecraftscc.utils import (
+    build_globalid_to_blockid_lut, projection_matrices_from_info, extract_camera_position_from_info, get_classes,
+)
+from networks import RecurrentModel, PriorNet, PosteriorNet, RewardModel, EncoderConv, DecoderConv, \
+    Critic, \
+    HybridActor, Decoder3d, DecoderDepth, Decoder3dSparse
+from utils import computeLambdaValues, Moments, collapse_world_updates
 
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
@@ -31,6 +32,7 @@ class Dreamer:
         self.observationShape   = observationShape
         cont_dim, actionLow, actionHigh = continuous
 
+        self.use_3d_predictions = config.use_3d_predictions
         self.disc_segments = list(disc_segments)
         self.actionContDim = cont_dim
         self.actionDiscDim = sum(self.disc_segments)
@@ -53,22 +55,48 @@ class Dreamer:
         self.posteriorNet    = PosteriorNet(config.recurrentSize + config.encodedObsSize, config.latentLength, config.latentClasses, config.posteriorNet   ).to(self.device)
         self.rewardPredictor = RewardModel(self.fullStateSize,                                                                       config.reward         ).to(self.device)
 
-        self.buffer         = ReplayBuffer(observationShape, self.actionSize, config.buffer, device)
+        self.buffer         = ReplayBuffer(observationShape, self.actionSize, config, device, self.use_3d_predictions)
         self.valueMoments   = Moments(device)
-
 
         self.block_state_registry = None
         self.block_state_registry_lut = None
         self.classes = config.minecraft.classes
-        self.minecraftSegmentationHead = MinecraftSegmentationHead(self.config, self.device, self.fullStateSize,
-                                                                   self.observationShape, self.classes).to(self.device)
+        if (self.use_3d_predictions == 'dense'):
+            decoder3d = DecoderConv(
+                self.fullStateSize, [config.minecraft.prediction_head.feature_size, self.config.resolution[0], self.config.resolution[1]],
+                config.decoder #TODO feature_size is under questions, especially if we increase the resolution
+            ).to(self.device)
+            self.minecraftSegmentationHead = Decoder3d(
+                decoder3d,
+                MinecraftSegmentationHead(self.config, self.device, self.observationShape, self.classes).to(self.device)
+            )
+            self.minecraftHeadOptimiser = torch.optim.Adam(self.minecraftSegmentationHead.parameters(),self.config.worldModelLR)
+
+        if (self.use_3d_predictions == 'sparse'):
+            decoder3d = DecoderConv(
+                self.fullStateSize, [config.minecraft.prediction_head.feature_size - config.depth.feature_size,
+                                     self.config.resolution[0], self.config.resolution[1]],
+                config.decoder #TODO feature_size is under questions, especially if we increase the resolution
+            ).to(self.device)
+            self.minecraftSegmentationHead = Decoder3dSparse(
+                decoder3d,
+                SparseMinecraftSegmentationHead(self.config, self.device, self.classes).to(self.device)
+            )
+        # if (self.use_3d_predictions == 'sparse'):
+        decoderDepth = DecoderConv(
+                 self.fullStateSize, [config.depth.feature_size, self.config.resolution[0], self.config.resolution[1]],
+                 config.decoder #TODO feature_size is under questions, especially if we increase the resolution
+            )
+        self.depthPredictionHead = DecoderDepth(decoderDepth, DepthMDNHead(config.depth.feature_size)).to(self.device)
 
         self.worldModelParameters = (list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.recurrentModel.parameters()) +
-                                     list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()))
+                                     list(self.priorNet.parameters()) + list(self.posteriorNet.parameters()) + list(self.rewardPredictor.parameters()) +
+                                     list(self.depthPredictionHead.parameters()))
 
+        if self.use_3d_predictions == "sparse":
+            self.worldModelParameters += list(self.minecraftSegmentationHead.parameters())
 
         self.worldModelOptimizer    = torch.optim.Adam(self.worldModelParameters,   lr=self.config.worldModelLR)
-        self.minecraftHeadOptimiser = torch.optim.Adam(self.minecraftSegmentationHead.parameters(), self.config.worldModelLR)
         self.actorOptimizer         = torch.optim.Adam(self.actor.parameters(),     lr=self.config.actorLR)
         self.criticOptimizer        = torch.optim.Adam(self.critic.parameters(),    lr=self.config.criticLR)
 
@@ -89,14 +117,14 @@ class Dreamer:
         if "macro"   in a: parts.append(a["macro"])
         return torch.cat(parts, -1) if parts else None
 
-    def worldModelTraining(self, data, enable3dLoss = True):
+    def worldModelTraining(self, data):
         encodedObservations = self.encoder(data.observations.view(-1, *self.observationShape)).view(self.config.batchSize, self.config.batchLength, -1)
         previousRecurrentState = torch.zeros(self.config.batchSize, self.recurrentSize, device=self.device)
         previousLatentState = torch.zeros(self.config.batchSize, self.latentSize, device=self.device)
 
         recurrentStates, priorsLogits, posteriors, posteriorsLogits = [], [], [], []
-        reconstruction3DLoss = 0
-        reconstruction3D_CE = 0.0
+        reconstruction3DLoss = torch.tensor(0.0, device=self.device)
+        reconstruction3D_CE = torch.tensor(0.0, device=self.device)
         for t in range(1, self.config.batchLength):
             first_t = data.is_first[:, t].float()
 
@@ -117,16 +145,23 @@ class Dreamer:
             previousLatentState = posterior
 
 
-            if enable3dLoss:
-                camera_position, grid_origin, grid = next(data.world_trajectories)
+            if self.use_3d_predictions == "dense":
+                camera_position, model_view_metrix, projection_metrix, grid_origin, grid_np = next(data.world_trajectories)
                 camera_position = torch.from_numpy(camera_position).to(self.device)
+                model_view_metrix = torch.from_numpy(model_view_metrix).to(self.device)
+                projection_metrix = torch.from_numpy(projection_metrix).to(self.device)
                 grid_origin = torch.from_numpy(grid_origin).to(self.device)
-                grid = torch.from_numpy(grid).to(self.device)
+                grid = torch.from_numpy(grid_np).to(self.device)
+
+                assert grid_np.min() >= 0, "grid contains negative global_id values"
+                assert grid_np.max() < self.block_state_registry_lut.shape[0], (
+                    f"grid contains global_id >= lut_size: max={grid_np.max()}, lut_size={self.block_state_registry_lut.shape[0]}"
+                )
                 block_id_grid = self.block_state_registry_lut[grid.long()]  # TODO Do not need this mapping in final version
                 full_state_step = torch.cat((recurrentState, posterior), dim=-1)
                 ssc_input = full_state_step.detach().requires_grad_(True)
 
-                reconstruction3DLatent, mask3d = self.minecraftSegmentationHead(ssc_input, camera_position, grid_origin)
+                reconstruction3DLatent, mask3d = self.minecraftSegmentationHead(ssc_input, camera_position, model_view_metrix, projection_metrix, grid_origin)
 
                 num_classes = reconstruction3DLatent.shape[1]
                 class_weight = torch.ones(num_classes, device=self.device)
@@ -147,11 +182,56 @@ class Dreamer:
         posteriorsLogits            = torch.stack(posteriorsLogits,             dim=1) # (batchSize, batchLength-1, latentLength, latentClasses)
         fullStates                  = torch.cat((recurrentStates, posteriors), dim=-1) # (batchSize, batchLength-1, recurrentSize + latentLength*latentClasses)
 
+        B = self.config.batchSize
+        T = self.config.batchLength - 1
+        fullStatesTransformedBatch = fullStates.view(-1, self.fullStateSize)
+        reconstructionMeans = self.decoder(fullStatesTransformedBatch).view(B, T, *self.observationShape)
+        reconstructionLoss = -Normal(reconstructionMeans, 1.0).log_prob(data.observations[:, 1:]).mean() - 0.9189
 
-        reconstructionMeans = self.decoder(fullStates.view(-1, self.fullStateSize)).view(self.config.batchSize, self.config.batchLength-1, *self.observationShape)
-        reconstructionMeans = symlog(reconstructionMeans)
-        reconstructionLoss = -Normal(reconstructionMeans, 1.0).log_prob(symlog(data.observations[:, 1:])).mean()
+        depthPrediction, depth_features = self.depthPredictionHead(fullStatesTransformedBatch)
+        depthGroundTruth = data.depths[:, 1:].reshape(-1, *self.observationShape)
+        depthPredictionLoss = lognormal_mdn_nll_loss(*depthPrediction, depthGroundTruth) - 0.9189
 
+        sparse_3d_ce_loss = torch.tensor(0.0, device=self.device)
+        if self.use_3d_predictions == "sparse":
+            depth_mixture_weights, depth_component_means, depth_component_scales = depthPrediction
+            camera_position = data.camera_position[:, 1:].reshape(-1, data.camera_position.size(-1))
+            model_view_metrix = data.model_view_metrix[:, 1:].reshape(-1, *data.model_view_metrix.shape[2:])
+            projection_metrix = data.projection_metrix[:, 1:].reshape(-1, *data.projection_metrix.shape[2:])
+
+            sparse_targets_xyz = torch.as_tensor(data.sparse_targets["coords"][:, 1:], device=self.device)
+            sparse_targets_valid = torch.as_tensor(data.sparse_targets["valid_mask"][:, 1:], device=self.device)
+
+            max_targets = sparse_targets_xyz.shape[2]
+            sparse_targets_xyz = sparse_targets_xyz.reshape(B * T, max_targets, 4)
+            sparse_targets_valid = sparse_targets_valid.reshape(B * T, max_targets)
+
+            target_xyz_world, target_labels = sparse_targets_xyz[..., :3],  sparse_targets_xyz[..., 3]
+
+             # Build (batch_time, x, y, z) for SparseMinecraftSegmentationHead
+            batch_time_ids = torch.arange(B * T, device=self.device, dtype=torch.int32)[:, None].expand(-1, max_targets)
+            batch_time_ids = batch_time_ids[sparse_targets_valid]           # [Q]
+            target_xyz_world = target_xyz_world[sparse_targets_valid]       # [Q,3]
+            target_labels = target_labels[sparse_targets_valid]             # [Q]
+
+            target_coords_world = torch.cat([batch_time_ids[:, None], target_xyz_world], dim=1)  # [Q,4]
+
+            # Forward returns logits only: [Q, num_classes]
+            logits = self.minecraftSegmentationHead(
+                depth_features,
+                fullStatesTransformedBatch,
+                depth_mixture_weights.detach(),
+                depth_component_means.detach(),
+                depth_component_scales.detach(),
+                camera_position,
+                model_view_metrix,
+                projection_metrix,
+                target_coords_world,
+            )
+
+            sparse_3d_ce_loss = sparse_ce_loss(logits, target_labels)
+
+        
         rewardDistribution  =  self.rewardPredictor(fullStates)
         rewardLoss          = -rewardDistribution.log_prob(data.rewards[:, 1:].squeeze(-1)).mean()
 
@@ -167,13 +247,15 @@ class Dreamer:
         priorLoss       = self.config.betaPrior*torch.maximum(priorLoss, freeNats)
         posteriorLoss   = self.config.betaPosterior*torch.maximum(posteriorLoss, freeNats)
         klLoss          = (priorLoss + posteriorLoss).mean()
-        reconstruction3DLoss = reconstruction3DLoss / (self.config.batchLength - 1)
-        reconstruction3D_CE = reconstruction3D_CE / (self.config.batchLength - 1)
+        reconstruction3DLoss = reconstruction3DLoss / T
+        reconstruction3D_CE = reconstruction3D_CE / T
 
-        worldModelLoss =  self.config.reconstructionLossCoefficient * reconstructionLoss + rewardLoss + klLoss + reconstruction3DLoss # I think that the reconstruction loss is relatively a bit too high (11k)
+        worldModelLoss =  self.config.reconstructionLossCoefficient * reconstructionLoss +\
+                          self.config.reconstruction3DLossCoefficient * reconstruction3DLoss + rewardLoss + klLoss +\
+                          self.config.depthPredictionLossCoefficient * depthPredictionLoss +\
+                          self.config.reconstruction3DLossCoefficient *  sparse_3d_ce_loss
 
         self.worldModelOptimizer.zero_grad()
-        #TODO Add loss masking
         worldModelLoss.backward()
         nn.utils.clip_grad_norm_(self.worldModelParameters, self.config.gradientClip, norm_type=self.config.gradientNormType)
         self.worldModelOptimizer.step()
@@ -182,7 +264,9 @@ class Dreamer:
         metrics = {
             "worldModelLoss"        : worldModelLoss.item() - klLossShiftForGraphing,
             "reconstructionLoss"    : reconstructionLoss.item(),
-            "reconstruction3DLoss"  :  reconstruction3D_CE.item() if enable3dLoss else 0,
+            "depthPredictionLoss"   :   depthPredictionLoss.item(),
+            "reconstruction3DLoss"  : reconstruction3D_CE.item(),
+            "sparse_3d_ce_loss"     : sparse_3d_ce_loss.item(),
             "rewardPredictorLoss"   : rewardLoss.item(),
             "klLoss"                : klLoss.item() - klLossShiftForGraphing}
         return fullStates.view(-1, self.fullStateSize).detach(), metrics
@@ -260,17 +344,20 @@ class Dreamer:
 
             future  = self._reset_future or self.prepareEnvironment(env)
             observation, info = future.result()
+            depth = info["depth"]
             self._reset_future = None
 
             registry = info["BlockStateRegistry"]
-            if not self.block_state_registry:
+            if registry:
                 assert len(get_classes(registry)) == self.classes
                 self.block_state_registry = registry
                 self.block_state_registry_lut = build_globalid_to_blockid_lut(self.block_state_registry, self.device)
+                self.buffer.block_state_registry_lut = self.block_state_registry_lut.cpu().numpy().astype(np.int32)
 
 
             world_state = decode_world_update(info["world_observation"])
             camera_position = extract_camera_position_from_info(info)
+            model_view_metrix, projection_metrix = projection_matrices_from_info(info)
             encodedObservation = self.encoder(torch.from_numpy(observation).float().unsqueeze(0).to(self.device))
 
             currentScore, stepCount, done, is_first, frames = 0, 0, False, True, []
@@ -286,11 +373,13 @@ class Dreamer:
 
                 for rep in range(action_repeat):
                     nextObservation, reward, done, info = env.step(actionFlat.cpu().numpy().reshape(-1))
+                    nextDepth = info["depth"]
                     totalReward += reward
 
                     # stream update per low-level tick
                     next_world_state = decode_world_update(info["world_observation"])
                     next_camera_position = extract_camera_position_from_info(info)
+                    next_model_view_metrix, next_projection_metrix = projection_matrices_from_info(info)
                     world_updates.append(next_world_state)
 
                     if saveVideo and i == 0:
@@ -305,13 +394,15 @@ class Dreamer:
 
 
                 if not evaluation:
-                    self.buffer.add(observation, world_state, camera_position, prevActionVec.cpu().numpy().reshape(-1), totalReward, done, is_first)
+                    self.buffer.add(observation, depth, world_state, camera_position, model_view_metrix, projection_metrix, prevActionVec.cpu().numpy().reshape(-1), totalReward, done, is_first)
                     world_state = collapse_world_updates(world_updates)
+                    model_view_metrix, projection_metrix = next_model_view_metrix, next_projection_metrix
                     camera_position = next_camera_position
                 is_first = False
 
                 encodedObservation = self.encoder(torch.from_numpy(nextObservation).float().unsqueeze(0).to(self.device))
                 observation = nextObservation
+                depth = nextDepth
                 currentScore += totalReward
 
                 if done:
@@ -369,10 +460,10 @@ class Dreamer:
         self.actor.load_state_dict(checkpoint["actor"])
         self.critic.load_state_dict(checkpoint["critic"])
         self.minecraftSegmentationHead.load_state_dict(checkpoint["minecraftSegmentationHead"])
-        self.minecraftHeadOptimiser.load_state_dict(checkpoint["minecraftHeadOptimiser"])
-        self.worldModelOptimizer.load_state_dict(checkpoint["worldModelOptimizer"])
-        self.criticOptimizer.load_state_dict(checkpoint["criticOptimizer"])
-        self.actorOptimizer.load_state_dict(checkpoint["actorOptimizer"])
+        # self.minecraftHeadOptimiser.load_state_dict(checkpoint["minecraftHeadOptimiser"])
+        # self.worldModelOptimizer.load_state_dict(checkpoint["worldModelOptimizer"])
+        # self.criticOptimizer.load_state_dict(checkpoint["criticOptimizer"])
+        # self.actorOptimizer.load_state_dict(checkpoint["actorOptimizer"])
         self.totalEpisodes = checkpoint["totalEpisodes"]
         self.totalEnvSteps = checkpoint["totalEnvSteps"]
         self.totalGradientSteps = checkpoint["totalGradientSteps"]

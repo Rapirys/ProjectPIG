@@ -37,6 +37,7 @@ import java.util.Map;
 public class NavigationDecoratorImplementation extends HandlerBase implements IWorldDecorator {
 
     private static final int BOUNDARY_SIZE = 64;     // worldborder size (square)
+    private static final int DEFAULT_SPAWN_RADIUS = 10;
     private static final int HALF = BOUNDARY_SIZE / 2;
 
     private NavigationDecorator nparams;
@@ -67,8 +68,10 @@ public class NavigationDecoratorImplementation extends HandlerBase implements IW
 
         // --- Random border center, but keep original spawn inside the 100x100 square ---
         // Spawn must satisfy: |spawn - center| < HALF
-        double offX = (SeedHelper.getRandom().nextDouble() * 2 - 1) * (HALF - 1);
-        double offZ = (SeedHelper.getRandom().nextDouble() * 2 - 1) * (HALF - 1);
+        double maxOff = (HALF - 1) - (DEFAULT_SPAWN_RADIUS + 2); // +2 safety
+        double offX = (SeedHelper.getRandom().nextDouble() * 2 - 1) * maxOff;
+        double offZ = (SeedHelper.getRandom().nextDouble() * 2 - 1) * maxOff;
+
         double centerX = originX + offX;
         double centerZ = originZ + offZ;
 

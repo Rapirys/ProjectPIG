@@ -24,19 +24,20 @@ import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
 
+import com.microsoft.Malmo.MissionHandlers.DepthProducerImplementation;
 import com.microsoft.Malmo.Utils.AddressHelper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.launchwrapper.Launch;
-import net.minecraftforge.client.event.GuiScreenEvent;
-import net.minecraftforge.client.event.RenderGameOverlayEvent;
+import net.minecraft.util.math.Vec3d;
 import net.minecraftforge.client.event.RenderWorldLastEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent.Phase;
 import net.minecraftforge.fml.common.gameevent.TickEvent.RenderTickEvent;
-import net.minecraftforge.client.event.RenderHandEvent;
 
 import org.lwjgl.BufferUtils;
 import org.lwjgl.LWJGLException;
@@ -51,6 +52,7 @@ import com.microsoft.Malmo.Schemas.MissionDiagnostics.VideoData;
 import com.microsoft.Malmo.Schemas.MissionInit;
 import com.microsoft.Malmo.Utils.TCPSocketChannel;
 import com.microsoft.Malmo.Utils.TextureHelper;
+import org.lwjgl.opengl.GL11;
 
 
 /**
@@ -264,15 +266,23 @@ public class VideoHook {
      *            Contains information about the event (not used).
      */
     @SubscribeEvent
-    public void postRender(PostRenderEvent event) {
-        //        // WHG: HAND RENDER
-        //        // To render with hand convert RenderWorldLastEvent to RenderGameOverlayEvent.Pre
-        //        // Then include the following lines
-        //        if (event.getType() != RenderGameOverlayEvent.ElementType.ALL)
-        //            return;
-                float partialTicks = event.getPartialTicks();
-                getVideo(partialTicks);
-            }
+//    public void postRender(PostRenderEvent event) { TODO use PostRenderEvent to get heand
+    public void postRender(RenderWorldLastEvent event) {
+        if (videoProducer instanceof DepthProducerImplementation) {
+            return;
+        }
+        float partialTicks = event.getPartialTicks();
+        getVideo(partialTicks);
+    }
+
+    @SubscribeEvent
+    public void postRenderDepth(RenderWorldLastEvent event) {
+        if (!(videoProducer instanceof DepthProducerImplementation)) {
+            return;
+        }
+        float partialTicks = event.getPartialTicks();
+        getVideo(partialTicks);
+    }
 
     private void getVideo(float partialTicks) {
         // Check that the video producer and frame type match - eg if this is a
@@ -316,11 +326,12 @@ public class VideoHook {
                     this.videoProducer.getFrame(this.missionInit, this.buffer);
                     this.buffer.get(data); // Avoiding copy not simple as data is kept & written to a stream later.
                     time_after_render_ns = System.nanoTime();
-                    envServer.addFrame(data);
+                    addFrame(data);;
                 } else {
                     time_after_render_ns = System.nanoTime();
                 }
             } else {
+                //TODO - this is correct
                 // Get buffer ready for writing to:
                 this.buffer.clear();
                 this.headerbuffer.clear();
@@ -411,6 +422,23 @@ public class VideoHook {
         {
             // TODO Auto-generated catch block
             e.printStackTrace();
+        }
+    }
+
+    private void addFrame(byte[] data) {
+        if (!(videoProducer instanceof DepthProducerImplementation)) {
+            envServer.addFrame(data);
+        }
+        else {
+            envServer.addDepthFrame(data);
+
+            FloatBuffer mv = BufferUtils.createFloatBuffer(16);
+            FloatBuffer pr = BufferUtils.createFloatBuffer(16);
+
+            GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, pr);
+            GL11.glGetFloat(GL11.GL_MODELVIEW_MATRIX, mv);
+
+            envServer.addRenderMatrices(mv, pr);
         }
     }
 }

@@ -12,5 +12,5 @@ dependencies = []
 package-dir = {"" = "Malmo/MalmoEnv"}
 
 [tool.setuptools.packages.find]
-where = ["Malmo/MalmoEnv"]
-include = ["malmoenv*"] # finds malmoenv package
+where = ["Malmo/MalmoEnv", "MinecraftSCC"]
+include = ["malmoenv*", "minecraftscc"] # finds malmoenv package

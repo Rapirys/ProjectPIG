@@ -1,17 +1,16 @@
-import math
-import time
-
-import gymnasium as gym
-import torch
 import argparse
+import math
 import os
 
+import torch
 from torch.backends import cudnn
 from tqdm.auto import tqdm  # add
-from dreamer    import Dreamer
-from utils      import loadConfig, seedEverything, plotMetrics, _now_sync
-from envs import getEnvProperties, GymPixelsProcessingWrapper, CleanGymWrapper, make_env
-from utils      import saveLossesToCSV, ensureParentFolders
+
+from dreamer import Dreamer
+from envs import getEnvProperties, make_env
+from utils import loadConfig, seedEverything, plotMetrics
+from utils import saveLossesToCSV, ensureParentFolders
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -52,7 +51,7 @@ def run(configFile):
 
         for step_idx in range(training_steps):
             sampledData = dreamer.buffer.sample(dreamer.config.batchSize, dreamer.config.batchLength)
-            initialStates, worldModelMetrics = dreamer.worldModelTraining(sampledData, enable3dLoss = False)
+            initialStates, worldModelMetrics = dreamer.worldModelTraining(sampledData)
             behaviorMetrics = dreamer.behaviorTraining(initialStates)
 
             # show timings on the bar
@@ -60,10 +59,9 @@ def run(configFile):
             pbar.update(1)
 
             if dreamer.totalGradientSteps % config.checkpointInterval == 0 and config.saveCheckpoints:
-                suffix = f"{dreamer.totalGradientSteps/1000:.0f}k"
-                dreamer.saveCheckpoint(f"{checkpointFilenameBase}_{suffix}")
-                evaluationScore = dreamer.environmentInteraction(envEvaluation, config.numEvaluationEpisodes, seed=config.seed, evaluation=True, saveVideo=True, filename=f"{videoFilenameBase}_{suffix}")
-                print(f"Saved Checkpoint and Video at {suffix:>6} gradient steps.")
+                dreamer.saveCheckpoint(f"{checkpointFilenameBase}_{dreamer.totalGradientSteps}")
+                # evaluationScore = dreamer.environmentInteraction(envEvaluation, config.numEvaluationEpisodes, seed=config.seed, evaluation=True, saveVideo=True, filename=f"{videoFilenameBase}_{dreamer.totalGradientSteps}")
+                print(f"Saved Checkpoint and Video at {dreamer.totalGradientSteps:>6} gradient steps.")
 
         if config.saveMetrics:
             metricsBase = {"envSteps": dreamer.totalEnvSteps, "gradientSteps": dreamer.totalGradientSteps, "totalReward" : mostRecentScore}
