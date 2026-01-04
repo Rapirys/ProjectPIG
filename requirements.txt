@@ -1,13 +1,30 @@
 --extra-index-url https://download.pytorch.org/whl/cu126
-
-gymnasium[box2d,other]==1.2.0
 torch==2.7.0
 numpy==2.3.2
+
+# RL / env stack
+gymnasium[box2d,other]==1.2.0
+mujoco>=3.3.6,<4.0.0
+dm_control==1.0.34
+
+# Vision / plotting / logging
+opencv-python>=4.9.0.80
+matplotlib>=3.8
+tensorboard>=2.17.1
 imageio==2.37.0
-pandas==2.3.1
-plotly==6.3.0
+pillow
+
+# Config / serialization / misc utils
+ruamel.yaml>=0.17.4
+protobuf>=4.24.0,<6.0.0
+moviepy>=1.0.3
+einops>=0.3.0
+tqdm
 attridict==0.0.9
 lxml
-pillow
-tqdm
+
+# Data / analysis / viz
+pandas==2.3.1
+plotly==6.3.0
+
 spconv-cu120
