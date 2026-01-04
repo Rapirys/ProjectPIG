@@ -341,8 +341,7 @@ class Env:
         info = self._parse_malmo_info_dict(malmo_info)
         if world_state_bytes is not None:
             info["world_observation"] = world_state_bytes
-        info["depth"] = self.depth
-        info["depth_obs"] = depth
+        info["depth"] = depth
         info["model_view_metrix"] = mv
         info["projection_metrix"] = pr
         return obs, info

@@ -10,18 +10,13 @@ import numpy as np
 import malmoenv
 
 DEFAULT_ACTIONS: dict[str, int] = {
-    "forward": 0,
-    "back": 0,
-    "left": 0,
-    "right": 0,
+    "move": 0,
     "jump": 0,
     "sneak": 0,
     "sprint": 0,
     "attack": 0,
     "use": 0,
-    "drop": 0,
-    "swapHands": 0,
-    "moveMouse": 0
+    "moveMouse": 0,
 }
 
 BASIC_ACTIONS: dict[str, dict] = {
@@ -29,14 +24,12 @@ BASIC_ACTIONS: dict[str, dict] = {
     "noop": {},
     "attack": {"attack": 1},
     "use": {"use": 1},
-    "drop": {"drop": 1},
-    "swap_hands": {"swapHands": 1},
-    "forward": {"forward": 1},
-    "back": {"back": 1},
-    "left": {"left": 1},
-    "right": {"right": 1},
+    "forward": {"move": 1},
+    "back": {"move": 2},
+    "right": {"move": 3},
+    "left": {"move": 4},
     "jump": {"jump": 1},
-    "jump_forward": {"jump": 1, "forward": 1},
+    "jump_forward": {"jump": 1, "move": 1},
     "sneak": {"sneak": 1},
     "sprint": {"sprint": 1},
 
@@ -56,12 +49,6 @@ BASIC_ACTIONS: dict[str, dict] = {
     "hotbar_1": {"hotbar": 0},
     "hotbar_2": {"hotbar": 1},
     "hotbar_3": {"hotbar": 2},
-    "hotbar_4": {"hotbar": 3},
-    "hotbar_5": {"hotbar": 4},
-    "hotbar_6": {"hotbar": 5},
-    "hotbar_7": {"hotbar": 6},
-    "hotbar_8": {"hotbar": 7},
-    "hotbar_9": {"hotbar": 8},
 }
 
 
@@ -119,7 +106,6 @@ class _MalmoAdapter(gym.Env):
 class MalmoMinecraft(gym.Env):
     """Dreamer-friendly wrapper:
        - Discrete macro action space (BASIC_ACTIONS)
-       - Expands macro -> multiple low-level commands in ONE step
        - Action repeat
        - Time limit with Gymnasium terminated/truncated
        - 64x64 RGB frames (uint8 HxW×3)
@@ -147,11 +133,13 @@ class MalmoMinecraft(gym.Env):
         self._need_resize = (H, W) != size
         if self._need_resize:
             warnings.warn(f"Mission video size {H}x{W} != requested {size}")
-        assert C in (3, 4), "Mission must output RGB or RGBD"
-        self._rgb_slice = np.s_[:, :, :3]
+        assert C == 3, "Mission must output RGB"
         self.observation_space = gym.spaces.Dict(
             {
                 "image": gym.spaces.Box(0, 255, (size[0], size[1], 3), dtype=np.uint8),
+                "depth": gym.spaces.Box(0.0, np.inf, (size[0], size[1]), dtype=np.float32),
+                "model_view_metrix": gym.spaces.Box(-np.inf, np.inf, (4, 4), dtype=np.float32),
+                "projection_metrix": gym.spaces.Box(-np.inf, np.inf, (4, 4), dtype=np.float32),
                 "is_first": gym.spaces.Box(0, 1, (), dtype=np.uint8),
                 "is_last": gym.spaces.Box(0, 1, (), dtype=np.uint8),
                 "is_terminal": gym.spaces.Box(0, 1, (), dtype=np.uint8),
@@ -206,13 +194,18 @@ class MalmoMinecraft(gym.Env):
         actions.update((k,v) for k, v in macro.items())
         return actions
 
-    def _format_obs(self, raw_rgb: np.ndarray, info: dict, *, is_first: bool, is_last: bool, is_terminal: bool):
-        rgb = raw_rgb[self._rgb_slice]
+    def _format_obs(self, rgb: np.ndarray, info: dict, *, is_first: bool, is_last: bool, is_terminal: bool):
+        depth = info.get("depth")
         if self._need_resize:
             rgb = cv2.resize(rgb, (self.size[1], self.size[0]), interpolation=cv2.INTER_AREA)
+            depth = cv2.resize(depth, (self.size[1], self.size[0]), interpolation=cv2.INTER_AREA)
+
         health = np.float32([(info.get("life", 20) / 20.0)])
         out = {
             "image": rgb.astype(np.uint8),
+            "depth": depth.astype(np.float32),
+            "model_view_metrix": info.get("model_view_metrix").astype(np.float32),
+            "projection_metrix": info.get("projection_metrix").astype(np.float32),
             "is_first": np.array(is_first, np.uint8),
             "is_last": np.array(is_last, np.uint8),
             "is_terminal": np.array(is_terminal, np.uint8),

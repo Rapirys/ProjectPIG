@@ -15,7 +15,7 @@ imageio==2.37.0
 pillow
 
 # Config / serialization / misc utils
-ruamel.yaml>=0.17.4
+ruamel.yaml>=0.17.4,<0.18
 protobuf>=4.24.0,<6.0.0
 moviepy>=1.0.3
 einops>=0.3.0
