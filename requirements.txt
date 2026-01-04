@@ -10,4 +10,5 @@ attridict==0.0.9
 lxml
 pillow
 tqdm
+cumm-cu126
 spconv-cu126 @ https://github.com/MrForExample/Comfy3D_Pre_Builds/raw/main/_Build_Wheels/_Wheels_linux_py312_torch2.7.0_cu128/spconv_cu126-2.3.8-cp312-cp312-manylinux_2_28_x86_64.whl
