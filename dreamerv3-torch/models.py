@@ -84,6 +84,10 @@ class WorldModel(nn.Module):
             device=config.device,
             name="Cont",
         )
+        if getattr(config, "use3dHead", True): #TODO get rid of use3dHead and relly on config.gradHeads
+            self.heads["depth"] = networks.DepthHead(feat_size, config).to(config.device)
+            self.heads["decoder3d"] = networks.Sparse3DHead(feat_size, config).to(config.device)
+
         for name in config.grad_heads:
             assert name in self.heads, name
         self._model_opt = tools.Optimizer(
@@ -103,6 +107,8 @@ class WorldModel(nn.Module):
         self._scales = dict(
             reward=config.reward_head["loss_scale"],
             cont=config.cont_head["loss_scale"],
+            decoder3d=config.minecraft.get("loss_scale", 1.0) if getattr(config, "use3dHead", False) else 0.0,
+            depth=config.depth_head.get("loss_scale", 1.0) if getattr(config, "use3dHead", False) else 0.0
         )
 
     def _train(self, data):
@@ -126,10 +132,17 @@ class WorldModel(nn.Module):
                 )
                 assert kl_loss.shape == embed.shape[:2], kl_loss.shape
                 preds = {}
+                aux = {}
                 for name, head in self.heads.items():
                     grad_head = name in self._config.grad_heads
                     feat = self.dynamics.get_feat(post)
                     feat = feat if grad_head else feat.detach()
+                    if name == "depth":
+                        aux["depth"] = head(feat)
+                        continue
+                    if name == "decoder3d":
+                        aux["decoder3d"] = head(feat, aux["depth"], data)
+                        continue
                     pred = head(feat)
                     if type(pred) is dict:
                         preds.update(pred)
@@ -140,6 +153,14 @@ class WorldModel(nn.Module):
                     loss = -pred.log_prob(data[name])
                     assert loss.shape == embed.shape[:2], (name, loss.shape)
                     losses[name] = loss
+                if "depth" in aux:
+                     loss = networks.DepthHead.loss(aux["depth"], data["depth"])
+                     losses["depth"] = loss[None, None].expand(embed.shape[:2])
+
+                if "decoder3d" in aux:
+                     loss = aux["decoder3d"]
+                     losses["decoder3d"] = loss[None, None].expand(embed.shape[:2])
+
                 scaled = {
                     key: value * self._scales.get(key, 1.0)
                     for key, value in losses.items()
@@ -172,9 +193,10 @@ class WorldModel(nn.Module):
 
     # this function is called during both rollout and training
     def preprocess(self, obs):
-        obs = {
-            k: torch.tensor(v, device=self._config.device, dtype=torch.float32)
-            for k, v in obs.items()
+        obs = { k: torch.tensor(v, device=self._config.device, dtype = (
+                                torch.int32 if k == "coords" else
+                                torch.bool if k in ("valid_mask", "direct_mask") else
+                                torch.float32))for k, v in obs.items()
         }
         obs["image"] = obs["image"] / 255.0
         if "discount" in obs:

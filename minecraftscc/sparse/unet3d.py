@@ -193,9 +193,8 @@ class ASPP(nn.Module):
 
 class CPMegaVoxels(nn.Module): # TODO rename
 
-    def __init__(self, feature, size, n_relations=4, bn_momentum=0.0003):
+    def __init__(self, feature, n_relations=4, bn_momentum=0.0003):
         super().__init__()
-        self.size = size
         self.n_relations = n_relations
         self.feature = feature
 
@@ -234,18 +233,10 @@ class UNet3D(nn.Module):
         bn_momentum = 0.1,
     ):
         super().__init__()
-        projection_scale = config.minecraft.projection_scale
-        scene_size = config.minecraft.scene_size
-        feature = config.minecraft.prediction_head.feature_size
-        dilations = config.minecraft.prediction_head.dilations
+        projection_scale = config.minecraft["projection_scale"]
+        feature = config.minecraft["prediction_head"]["feature_size"]
+        dilations = config.minecraft["prediction_head"]["dilations"]
 
-        size_l1 = (
-            int(scene_size[0] / projection_scale),
-            int(scene_size[1] / projection_scale),
-            int(scene_size[2] / projection_scale),
-        )
-        size_l2 = (size_l1[0] // 2, size_l1[1] // 2, size_l1[2] // 2)
-        size_l3 = (size_l2[0] // 2, size_l2[1] // 2, size_l2[2] // 2)
 
         self.process_l1 = nn.Sequential(
             Process(feature, norm_layer, bn_momentum, dilations, stage_prefix="l1_proc"),
@@ -278,7 +269,7 @@ class UNet3D(nn.Module):
 
         self.context_prior = context_prior
         if context_prior:
-            self.CP_mega_voxels = CPMegaVoxels(feature * 4, size_l3, bn_momentum=bn_momentum)
+            self.CP_mega_voxels = CPMegaVoxels(feature * 4, bn_momentum=bn_momentum)
 
     def forward(self, x: spconv.SparseConvTensor) -> spconv.SparseConvTensor:
         x3d_l1 = x
@@ -303,8 +294,8 @@ class UNet3D(nn.Module):
 class SegmentationHead(nn.Module):
     def __init__(self, config, classes: int):
         super().__init__()
-        dilations = config.minecraft.prediction_head.dilations
-        c_in = config.minecraft.prediction_head.feature_size // 2
+        dilations = config.minecraft["prediction_head"]["dilations"]
+        c_in = config.minecraft["prediction_head"]["feature_size"] // 2
 
         self.conv_list = dilations
         self.conv1 = nn.ModuleList(

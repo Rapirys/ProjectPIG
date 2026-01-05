@@ -1,4 +1,3 @@
-import math
 import pathlib
 import warnings
 from typing import Dict, Tuple
@@ -6,8 +5,13 @@ from typing import Dict, Tuple
 import cv2
 import gymnasium as gym
 import numpy as np
+import torch
 
 import malmoenv
+from malmoenv.world_tracking.utils import decode_world_update
+from malmoenv.world_tracking.world_buffer import WorldTrajectory
+from minecraftscc.sparse.data_preparation import visible_blocks_with_halo_numpy
+from minecraftscc.utils import build_globalid_to_blockid_lut
 
 DEFAULT_ACTIONS: dict[str, int] = {
     "move": 0,
@@ -59,7 +63,7 @@ class _MalmoAdapter(gym.Env):
 
     def __init__(self, mission_xml: str, reshape: bool = True):
         super().__init__()
-        self._env = malmoenv.make()  # malmoenv.core.Env()
+        self._env = malmoenv.make()
         self._env.init(
             mission_xml,
             port=10000,
@@ -118,11 +122,19 @@ class MalmoMinecraft(gym.Env):
         repeat: int = 1,
         size: Tuple[int, int] = (64, 64),
         time_limit: int | None = None,
+        max_target_blocks_3d: int = 0,
+        device = None,
+        use3d_head: bool = True,
     ):
         super().__init__()
         self._repeat = int(repeat)
         self._time_limit = int(time_limit) if time_limit else None
         self._step_count = 0
+
+        self._max_targets = max_target_blocks_3d
+        self.block_state_registry_lut = None
+        self._world_trajectory = WorldTrajectory(eager=True)
+        self.device = device
 
         mission_xml = pathlib.Path(mission_xml_path).read_text()
         self._env = _MalmoAdapter(mission_xml, reshape=True)
@@ -134,18 +146,27 @@ class MalmoMinecraft(gym.Env):
         if self._need_resize:
             warnings.warn(f"Mission video size {H}x{W} != requested {size}")
         assert C == 3, "Mission must output RGB"
-        self.observation_space = gym.spaces.Dict(
-            {
-                "image": gym.spaces.Box(0, 255, (size[0], size[1], 3), dtype=np.uint8),
+
+        int32_min, int32_max = np.iinfo(np.int32).min, np.iinfo(np.int32).max
+        spaces = {
+            "image": gym.spaces.Box(0, 255, (size[0], size[1], 3), dtype=np.uint8),
+            "is_first": gym.spaces.Box(0, 1, (), dtype=np.uint8),
+            "is_last": gym.spaces.Box(0, 1, (), dtype=np.uint8),
+            "is_terminal": gym.spaces.Box(0, 1, (), dtype=np.uint8),
+            "health": gym.spaces.Box(-np.inf, np.inf, (1,), dtype=np.float32),
+        }
+        self._use3d = bool(use3d_head)
+        if self._use3d:
+            spaces.update({
                 "depth": gym.spaces.Box(0.0, np.inf, (size[0], size[1]), dtype=np.float32),
+                "camera_position": gym.spaces.Box(-np.inf, np.inf, (3,), dtype=np.float32),
                 "model_view_metrix": gym.spaces.Box(-np.inf, np.inf, (4, 4), dtype=np.float32),
                 "projection_metrix": gym.spaces.Box(-np.inf, np.inf, (4, 4), dtype=np.float32),
-                "is_first": gym.spaces.Box(0, 1, (), dtype=np.uint8),
-                "is_last": gym.spaces.Box(0, 1, (), dtype=np.uint8),
-                "is_terminal": gym.spaces.Box(0, 1, (), dtype=np.uint8),
-                "health": gym.spaces.Box(-np.inf, np.inf, (1,), dtype=np.float32),
-            }
-        )
+                "coords": gym.spaces.Box(int32_min, int32_max, (self._max_targets, 4), dtype=np.int32),
+                "direct_mask": gym.spaces.Box(0, 1, (self._max_targets,), dtype=np.bool_),
+                "valid_mask": gym.spaces.Box(0, 1, (self._max_targets,), dtype=np.bool_),
+            })
+        self.observation_space = gym.spaces.Dict(spaces)
 
         # Discrete macro actions
         self._action_names = tuple(BASIC_ACTIONS.keys())
@@ -158,7 +179,14 @@ class MalmoMinecraft(gym.Env):
         obs, info = self._env.reset(seed=seed)
         self._step_count = 0
         self._first = True
-        return self._format_obs(obs, info, is_first=True, is_last=False, is_terminal=False), {}
+        self._world_trajectory = WorldTrajectory(eager=True)
+
+        if self._use3d:
+            registry = info["BlockStateRegistry"]
+            lut = build_globalid_to_blockid_lut(registry, device=None)
+            self.block_state_registry_lut = np.asarray(lut, dtype=np.int64)
+
+        return self._format_obs(obs, info, is_first=True, is_last=False, is_terminal=False), info
 
     def step(self, action: int):
         # Expand macro to low-level command dict
@@ -188,30 +216,85 @@ class MalmoMinecraft(gym.Env):
 
         return out_obs, reward_sum, terminated, truncated, info_last
 
-    # ---- Helpers ----
     def _expand_actions(self, macro: dict) -> dict[str, int]:
         actions = DEFAULT_ACTIONS.copy()
         actions.update((k,v) for k, v in macro.items())
         return actions
 
     def _format_obs(self, rgb: np.ndarray, info: dict, *, is_first: bool, is_last: bool, is_terminal: bool):
-        depth = info.get("depth")
         if self._need_resize:
             rgb = cv2.resize(rgb, (self.size[1], self.size[0]), interpolation=cv2.INTER_AREA)
-            depth = cv2.resize(depth, (self.size[1], self.size[0]), interpolation=cv2.INTER_AREA)
 
         health = np.float32([(info.get("life", 20) / 20.0)])
         out = {
             "image": rgb.astype(np.uint8),
-            "depth": depth.astype(np.float32),
-            "model_view_metrix": info.get("model_view_metrix").astype(np.float32),
-            "projection_metrix": info.get("projection_metrix").astype(np.float32),
             "is_first": np.array(is_first, np.uint8),
             "is_last": np.array(is_last, np.uint8),
             "is_terminal": np.array(is_terminal, np.uint8),
             "health": health,
         }
+        if self._use3d:
+            depth = info.get("depth")
+            if self._need_resize:
+                depth = cv2.resize(depth, (self.size[1], self.size[0]), interpolation=cv2.INTER_AREA)
+
+            camera_position = np.asarray([info["xEyesPos"], info["yEyesPos"], info["zEyesPos"]], dtype=np.float32)
+            model_view_metrix = info["model_view_metrix"].astype(np.float32)
+            projection_metrix = info["projection_metrix"].astype(np.float32)
+
+            world_state = decode_world_update(info["world_observation"])
+            self._world_trajectory.add_update(world_state, camera_position, model_view_metrix, projection_metrix)
+
+            coords, direct_mask = self._compute_sparse_targets(depth, camera_position, model_view_metrix, projection_metrix)
+
+            n = coords.shape[0]
+            pad = self._max_targets - n
+
+            coords = np.pad(coords.astype(np.int32, copy=False), ((0, pad), (0, 0)))
+            direct = np.pad(direct_mask.astype(bool, copy=False), (0, pad))
+            valid_mask = np.arange(self._max_targets) < n
+
+            out.update({
+                "depth": depth.astype(np.float32),
+                "camera_position": camera_position,
+                "model_view_metrix": model_view_metrix,
+                "projection_metrix": projection_metrix,
+                "coords": coords,
+                "direct_mask": direct,
+                "valid_mask": valid_mask,
+            })
         return out
+
+    def _compute_sparse_targets(
+        self,
+        depth: np.ndarray,
+        camera_position: np.ndarray,
+        model_view_metrix: np.ndarray,
+        projection_metrix: np.ndarray,
+    ):
+        # NOTE: visible_blocks_with_halo_numpy expects [B,H,W]
+        coords, direct_mask = visible_blocks_with_halo_numpy(
+            depth_camera_z=torch.from_numpy(depth[None]).to(device=self.device),
+            camera_position=torch.from_numpy(camera_position).to(device=self.device),
+            model_view_metrix=torch.from_numpy(model_view_metrix).to(device=self.device),
+            projection_metrix=torch.from_numpy(projection_metrix).to(device=self.device),
+            halo_size=(1, 1, 1),
+        )
+        coords = coords[:, 1:4]
+
+        state_ids, valid = self._world_trajectory.lookup_block_states(coords)
+        coords = coords[valid]
+        direct_mask = direct_mask[valid]
+        state_ids = state_ids[valid]
+        block_ids = self.block_state_registry_lut[state_ids]
+        coords = np.concatenate([coords, block_ids[:, None]], axis=1)
+
+        max_n = self._max_targets
+        if coords.shape[0] > max_n:
+            idx = np.random.choice(coords.shape[0], max_n, replace=False)
+            coords, direct_mask = coords[idx], direct_mask[idx]
+
+        return coords, direct_mask
 
     def render(self):
         return self._env.render()

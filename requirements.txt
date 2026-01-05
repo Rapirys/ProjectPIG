@@ -1,5 +1,4 @@
---extra-index-url https://download.pytorch.org/whl/cu126
-torch==2.7.0
+torch==2.8.0
 numpy==2.3.2
 
 # RL / env stack
@@ -27,4 +26,4 @@ lxml
 pandas==2.3.1
 plotly==6.3.0
 
-spconv-cu120
+spconv-cu121

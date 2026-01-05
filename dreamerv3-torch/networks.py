@@ -8,6 +8,9 @@ import torch.nn.functional as F
 from torch import distributions as torchd
 
 import tools
+from minecraftscc.sparse.losses import sparse_ce_loss
+from minecraftscc.sparse.minecraft import SparseMinecraftSegmentationHead
+from minecraftscc.sparse.models import DepthMDNHead, lognormal_mdn_nll_loss
 
 
 class RSSM(nn.Module):
@@ -306,7 +309,11 @@ class MultiEncoder(nn.Module):
         symlog_inputs,
     ):
         super(MultiEncoder, self).__init__()
-        excluded = ("is_first", "is_last", "is_terminal", "reward")
+        excluded = (
+                   "is_first", "is_last", "is_terminal", "reward",
+                   "depth", "coords", "direct_mask", "valid_mask",
+                   "camera_position", "model_view_metrix", "projection_metrix", "health",
+            )
         shapes = {
             k: v
             for k, v in shapes.items()
@@ -377,7 +384,11 @@ class MultiDecoder(nn.Module):
         outscale,
     ):
         super(MultiDecoder, self).__init__()
-        excluded = ("is_first", "is_last", "is_terminal")
+        excluded = (
+         "is_first", "is_last", "is_terminal",
+         "depth", "coords", "direct_mask", "valid_mask",
+         "camera_position", "model_view_metrix", "projection_metrix", "health",
+        )
         shapes = {k: v for k, v in shapes.items() if k not in excluded}
         self.cnn_shapes = {
             k: v for k, v in shapes.items() if len(v) == 3 and re.match(cnn_keys, k)
@@ -565,7 +576,7 @@ class ConvDecoder(nn.Module):
         outpad = pad * 2 - val
         return pad, outpad
 
-    def forward(self, features, dtype=None):
+    def forward(self, features, dtype=None, return_features=False):
         x = self._linear_layer(features)
         # (batch, time, -1) -> (batch * time, h, w, ch)
         x = x.reshape(
@@ -574,6 +585,8 @@ class ConvDecoder(nn.Module):
         # (batch, time, -1) -> (batch * time, ch, h, w)
         x = x.permute(0, 3, 1, 2)
         x = self.layers(x)
+        if return_features:
+            return x
         # (batch, time, -1) -> (batch, time, ch, h, w)
         mean = x.reshape(features.shape[:-1] + self._shape)
         # (batch, time, ch, h, w) -> (batch, time, h, w, ch)
@@ -808,3 +821,151 @@ class ImgChLayerNorm(nn.Module):
         x = self.norm(x)
         x = x.permute(0, 3, 1, 2)
         return x
+
+class DecoderDepth(nn.Module):
+    def __init__(self, decoder, depth_head):
+        super().__init__()
+        self.decoder = decoder
+        self.depth_head = depth_head
+
+    def forward(self, x):
+        features = self.decoder(x)
+        return self.depth_head(features), features
+
+
+class Decoder3dSparse(nn.Module):
+    def __init__(self, decoder, minecraftHead):
+        super().__init__()
+        self.decoder = decoder
+        self.minecraftHead = minecraftHead
+
+    def forward(
+        self,
+        depth_features: torch.Tensor,
+        full_state: torch.Tensor,  # [B, F]  (recurrent+latent)
+        mixture_weights: torch.Tensor,      # [B, K, H, W]
+        component_means: torch.Tensor,      # [B, K, H, W]
+        component_scales: torch.Tensor,     # [B, K, H, W]
+        camera_position: torch.Tensor,      # [B, 3]
+        model_view_metrix: torch.Tensor,    # [B, 4, 4]
+        projection_metrix: torch.Tensor,
+        target_coords: torch.Tensor,
+    ):
+        features = torch.cat([depth_features, self.decoder(full_state)], dim=1)
+        return self.minecraftHead(
+            features,
+            mixture_weights,
+            component_means,
+            component_scales,
+            camera_position,
+            model_view_metrix,
+            projection_metrix,
+            target_coords,
+        )
+
+
+class ConvDecoderFeatures(nn.Module):
+    def __init__(self, feat_size, out_channels, resolution, decoder_cfg):
+        super().__init__()
+        h, w = resolution
+        self.decoder = ConvDecoder(
+            feat_size,
+            shape=(out_channels, h, w),
+            depth=decoder_cfg["cnn_depth"],
+            act=decoder_cfg["act"],
+            norm=decoder_cfg["norm"],
+            kernel_size=decoder_cfg["kernel_size"],
+            minres=decoder_cfg["minres"],
+            outscale=decoder_cfg["outscale"],
+            cnn_sigmoid=False,
+        )
+
+    def forward(self, x):
+        return self.decoder(x, return_features=True)
+
+
+class DepthHead(nn.Module):
+    def __init__(self, feat_size, config):
+        super().__init__()
+        c = config.depth_head["feature_size"]
+        k = config.depth_head.get("num_components", 3)
+        min_scale = config.depth_head.get("min_scale", 1e-3)
+
+        decoder = ConvDecoderFeatures(feat_size, c, config.size, config.decoder)
+        self.model = DecoderDepth(decoder, DepthMDNHead(c, num_components=k, min_scale=min_scale))
+
+    def forward(self, feat):
+        b, t, f = feat.shape
+        (mw, mu, sig), depth_features = self.model(feat.reshape(b * t, f))
+
+        k = mw.shape[1]
+        h, w = mw.shape[-2:]
+        c = depth_features.shape[1]
+
+        mw = mw.view(b, t, k, h, w)
+        mu = mu.view(b, t, k, h, w)
+        sig = sig.view(b, t, k, h, w)
+        depth_features = depth_features.view(b, t, c, h, w)
+
+        return (mw, mu, sig), depth_features
+
+    @staticmethod
+    def loss(depth_out, depth_gt):
+        (mw, mu, sig), _ = depth_out
+        b, t, k, h, w = mw.shape
+        mw = mw.reshape(b * t, k, h, w)
+        mu = mu.reshape(b * t, k, h, w)
+        sig = sig.reshape(b * t, k, h, w)
+        gt = depth_gt.reshape(b * t, *depth_gt.shape[2:])
+        return lognormal_mdn_nll_loss(mw, mu, sig, gt)
+
+
+class Sparse3DHead(nn.Module):
+    def __init__(self, feat_size, config):
+        super().__init__()
+        c_total = config.minecraft["prediction_head"]["feature_size"]
+        c_depth = config.depth_head["feature_size"]
+        c_img = c_total - c_depth
+
+        decoder = ConvDecoderFeatures(feat_size, c_img, config.size, config.decoder)
+
+        self.classes = int(config.minecraft["classes"])
+        self.head = SparseMinecraftSegmentationHead(config, config.device, self.classes).to(config.device)
+        self.model = Decoder3dSparse(decoder, self.head)
+
+    def forward(self, feat, depth_out, data):
+        (mw, mu, sig), depth_features = depth_out
+        b, t, _ = feat.shape
+        bt = b*t
+        device = feat.device
+
+        camera_position = data["camera_position"].reshape(bt, data["camera_position"].shape[-1])
+        model_view_metrix = data["model_view_metrix"].reshape(bt, *data["model_view_metrix"].shape[2:])
+        projection_metrix = data["projection_metrix"].reshape(bt, *data["projection_metrix"].shape[2:])
+
+        coords = data["coords"].reshape(bt, data["coords"].shape[2], 4)
+        valid = data["valid_mask"].reshape(bt, data["valid_mask"].shape[2])
+
+        target_xyz_world, target_labels = coords[..., :3], coords[..., 3]
+
+        max_targets = coords.shape[1]
+        batch_time_ids = torch.arange(bt, device=device, dtype=torch.int32)[:, None].expand(-1, max_targets)
+        batch_time_ids = batch_time_ids[valid]
+        target_xyz_world = target_xyz_world[valid]
+        target_labels = target_labels[valid]
+
+
+        target_coords_world = torch.cat([batch_time_ids[:, None], target_xyz_world], dim=1)
+
+        logits = self.model(
+            depth_features.reshape(bt, *depth_features.shape[2:]),
+            feat.reshape(bt, feat.shape[-1]),
+            mw.reshape(bt, *mw.shape[2:]).detach(),
+            mu.reshape(bt, *mu.shape[2:]).detach(),
+            sig.reshape(bt, *sig.shape[2:]).detach(),
+            camera_position,
+            model_view_metrix,
+            projection_metrix,
+            target_coords_world,
+        )
+        return sparse_ce_loss(logits, target_labels)

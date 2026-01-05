@@ -93,6 +93,25 @@ defaults:
   disag_units: 400
   disag_action_cond: False
 
+  max_target_blocks_3d: 4096
+  use3dHead: True
+
+  depth_head:
+    feature_size: 32
+    num_components: 3
+    min_scale: 1.0e-3
+    loss_scale: 256
+
+  minecraft:
+    classes: 236
+    prediction_head:
+      feature_size: 64
+      dilations: [ 1, 2, 3 ]
+    projection_scale: 1
+    render_distance: 4
+    loss_scale: 16
+
+
 dmc_proprio:
   steps: 5e5
   action_repeat: 2
@@ -147,7 +166,7 @@ atari100k:
 
 minecraft:
   task: minecraft_diamond
-  step: 1e8
+  step: 1000 # True limit is 800 on env
   parallel: False
   envs: 16
   # no eval
@@ -183,5 +202,5 @@ debug:
   debug: True
   pretrain: 1
   prefill: 1
-  batch_size: 10
-  batch_length: 20
+  batch_size: 8
+  batch_length: 8

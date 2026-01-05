@@ -4,6 +4,8 @@ import os
 import pathlib
 import sys
 
+from tqdm import tqdm
+
 os.environ["MUJOCO_GL"] = "osmesa"
 
 import numpy as np
@@ -197,10 +199,13 @@ def make_env(config, mode, id):
     elif suite == "CustomMinecraft":
         from envs.minecraft_malmo import MalmoMinecraft
         env = MalmoMinecraft(
-            mission_xml_path="../Malmo/MalmoEnv/missions/findthegoalexteme.xml",
+            mission_xml_path="Malmo/MalmoEnv/missions/findthegoalexteme.xml",
             repeat=config.action_repeat,
             size=config.size,
             time_limit=None,
+            max_target_blocks_3d=config.max_target_blocks_3d,
+            device=config.device,
+            use3d_head=config.use3dHead,
         )
         env = wrappers.OneHotAction(env)
     else:

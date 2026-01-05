@@ -89,7 +89,7 @@ class SparseMinecraftSegmentationHead(nn.Module):
         return logits
 
     def _world_origin_and_shape(self, camera_position: torch.Tensor):
-        render_dist_blocks = self.config.minecraft.render_distance * 16 + MARGIN  # int
+        render_dist_blocks = self.config.minecraft["render_distance"] * 16 + MARGIN  # int
         player_x, player_z = camera_position[:, 0], camera_position[:, 2]
         x0 = torch.floor(player_x - render_dist_blocks).to(torch.int32)
         z0 = torch.floor(player_z - render_dist_blocks).to(torch.int32)

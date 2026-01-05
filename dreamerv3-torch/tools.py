@@ -15,7 +15,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch import distributions as torchd
 from torch.utils.tensorboard import SummaryWriter
-
+from tqdm import tqdm
 
 to_np = lambda x: x.detach().cpu().numpy()
 
@@ -147,6 +147,8 @@ def simulate(
         reward = [0] * len(envs)
     else:
         step, episode, done, length, obs, agent_state, reward = state
+
+    pbar = tqdm(total=steps, initial=step, unit="step")
     while (steps and step < steps) or (episodes and episode < episodes):
         # reset envs if necessary
         if done.any():
@@ -247,6 +249,8 @@ def simulate(
                         logger.scalar(f"eval_episodes", len(eval_scores))
                         logger.write(step=logger.step)
                         eval_done = True
+        pbar.update(len(envs))
+    pbar.close()
     if is_eval:
         # keep only last item for saving memory. this cache is used for video_pred later
         while len(cache) > 1:
