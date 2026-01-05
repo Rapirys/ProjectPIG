@@ -1,0 +1,9 @@
+docker_logs/
+**/*.log
+**/xvfb-run.*
+.venv/
+.git/
+__pycache__/
+**/__pycache__/
+**/*.pyc
+.ipynb_checkpoints/
