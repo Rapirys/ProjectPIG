@@ -109,7 +109,7 @@ defaults:
       dilations: [ 1, 2, 3 ]
     projection_scale: 1
     render_distance: 4
-    loss_scale: 16
+    loss_scale: 256
 
 
 dmc_proprio:
