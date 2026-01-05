@@ -64,7 +64,7 @@ dreamer:
     activation: ReLU
 
   depth:
-    feature_size: 16
+    feature_size: 32
 
   recurrentModel:
     hiddenSize: 256
@@ -106,13 +106,13 @@ dreamer:
   minecraft:
     render_distance: 4
     fov: 110 #TODO remove fov setting
-    max_target_blocks_3d: 2048
+    max_target_blocks_3d: 4096
     classes: 236
     scene_size: [20, 16, 20]
     projection_scale: 1
     prediction_head:
       dilations: [1, 2, 3]
-      feature_size: 48 #64
+      feature_size: 96 #64
 
 
 

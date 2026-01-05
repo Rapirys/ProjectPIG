@@ -68,7 +68,7 @@
                 <Block type="diamond_block" description="found_goal"/>
             </AgentQuitFromTouchingBlockType>
             <AgentQuitFromReachingCommandQuota description="step_limit">
-                <Quota commands="forward" quota="800"/>
+                <Quota commands="forward" quota="1200"/>
             </AgentQuitFromReachingCommandQuota>
             <MissionQuitCommands/>
 

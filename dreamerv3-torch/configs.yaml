@@ -105,7 +105,7 @@ defaults:
   minecraft:
     classes: 236
     prediction_head:
-      feature_size: 64
+      feature_size: 96
       dilations: [ 1, 2, 3 ]
     projection_scale: 1
     render_distance: 4
@@ -202,5 +202,6 @@ debug:
   debug: True
   pretrain: 1
   prefill: 1
+  train_ratio: 16
   batch_size: 8
   batch_length: 8
