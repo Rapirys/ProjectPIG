@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     build-essential pkg-config cmake \
     swig \
-    xvfb x11-utils xauth \
+    xvfb x11-utils x11-xserver-utils xauth \
     mesa-utils libgl1-mesa-dri libgl1-mesa-glx libglu1-mesa \
     netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*

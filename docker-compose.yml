@@ -2,7 +2,7 @@
 services:
   malmo_dreamer:
     build: .
-    shm_size: "2gb"
+    shm_size: "4gb"
     ports:
       - "10000:10000"
     environment:
@@ -10,3 +10,10 @@ services:
     # Optional: persist logs on host
     volumes:
       - ./docker_logs:/tmp
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
