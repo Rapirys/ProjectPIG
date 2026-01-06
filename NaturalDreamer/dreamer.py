@@ -189,7 +189,7 @@ class Dreamer:
         reconstructionLoss = -Normal(reconstructionMeans, 1.0).log_prob(data.observations[:, 1:]).mean() - 0.9189
 
         depthPrediction, depth_features = self.depthPredictionHead(fullStatesTransformedBatch)
-        depthGroundTruth = data.depths[:, 1:].reshape(-1, *self.observationShape)
+        depthGroundTruth = data.depths[:, 1:].flatten(0, 1)
         depthPredictionLoss = lognormal_mdn_nll_loss(*depthPrediction, depthGroundTruth) - 0.9189
 
         sparse_3d_ce_loss = torch.tensor(0.0, device=self.device)

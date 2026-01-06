@@ -236,7 +236,7 @@ class MalmoMinecraft(gym.Env):
         if self._use3d:
             depth = info.get("depth")
             if self._need_resize:
-                depth = cv2.resize(depth, (self.size[1], self.size[0]), interpolation=cv2.INTER_AREA)
+                depth = cv2.resize(depth, (self.size[1], self.size[0]), interpolation=cv2.INTER_NEAREST)
 
             camera_position = np.asarray([info["xEyesPos"], info["yEyesPos"], info["zEyesPos"]], dtype=np.float32)
             model_view_metrix = info["model_view_metrix"].astype(np.float32)

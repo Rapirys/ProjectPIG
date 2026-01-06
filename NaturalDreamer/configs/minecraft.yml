@@ -106,7 +106,7 @@ dreamer:
   minecraft:
     render_distance: 4
     fov: 110 #TODO remove fov setting
-    max_target_blocks_3d: 2048
+    max_target_blocks_3d: 4096
     classes: 236
     scene_size: [20, 16, 20]
     projection_scale: 1
