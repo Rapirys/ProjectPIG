@@ -1,41 +1,31 @@
-FROM ubuntu:22.04
+FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Europe/Zagreb
+ARG DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED 1
+ENV PIP_DISABLE_PIP_VERSION_CHECK 1
+ENV PIP_NO_CACHE_DIR 1
 
 WORKDIR /workspace/ProjectPIG
 
-# Base tooling + Xvfb + Mesa + add-apt-repository
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git gnupg \
-    software-properties-common \
-    build-essential pkg-config cmake \
-    swig \
-    xvfb x11-utils x11-xserver-utils xauth \
-    mesa-utils libgl1-mesa-dri libgl1-mesa-glx libglu1-mesa \
-    netcat-openbsd \
-    && rm -rf /var/lib/apt/lists/*
+# Base tooling + Xvfb/Mesa + Java (for Malmo build + runtime)
+RUN apt-get update && apt-get install -y \
+    vim libgl1-mesa-glx libosmesa6 \
+    wget unrar cmake g++ libgl1-mesa-dev \
+    libx11-6 openjdk-8-jdk x11-xserver-utils xvfb \
+    && apt-get clean
 
-# Enable Universe (for openjdk-8) + Deadsnakes (for python3.11 on jammy)
-RUN add-apt-repository -y universe && \
-    add-apt-repository -y ppa:deadsnakes/ppa && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    openjdk-8-jdk \
-    python3.11 python3.11-dev python3.11-venv \
-    && rm -rf /var/lib/apt/lists/*
-
-# pip for python3.11 + convenience symlinks
-RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11
-RUN ln -sf /usr/bin/python3.11 /usr/local/bin/python && \
-    ln -sf /usr/local/bin/pip /usr/local/bin/pip3
+RUN pip3 install --upgrade pip
 
 # Copy repo (build from your local checkout; do not clone with tokens)
 COPY . /workspace/ProjectPIG
 
+# Build Malmo fat jar (so launchClient.sh uses the jar path, not gradle at runtime)
+RUN cd /workspace/ProjectPIG/Malmo/Minecraft && ./gradlew --no-daemon build
+
 # Python deps
-RUN python -m pip install --upgrade pip wheel setuptools
-RUN python -m pip install -r requirements.txt
-RUN python -m pip install -e .
+RUN python -m pip install --no-cache-dir --upgrade pip \
+ && python -m pip install --no-cache-dir -r requirements.txt \
+ && python -m pip install --no-cache-dir -e .
 
 # Entrypoint
 RUN chmod +x /workspace/ProjectPIG/docker/entrypoint.sh
