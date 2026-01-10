@@ -1,0 +1,7 @@
+services:
+  malmo_dreamer:
+    build: .
+    shm_size: "4gb"
+    ports:
+      - "10000:10000"
+    gpus: all

@@ -5,7 +5,7 @@ from torch import nn
 from minecraftscc.sparse.models import SparseFLoSPFromMDN
 from minecraftscc.sparse.unet3d import UNet3D, SegmentationHead
 
-MARGIN = 32
+MARGIN = 8
 
 
 class SparseMinecraftSegmentationHead(nn.Module):
@@ -89,13 +89,30 @@ class SparseMinecraftSegmentationHead(nn.Module):
         return logits
 
     def _world_origin_and_shape(self, camera_position: torch.Tensor):
-        render_dist_blocks = self.config.minecraft["render_distance"] * 16 + MARGIN  # int
-        player_x, player_z = camera_position[:, 0], camera_position[:, 2]
-        x0 = torch.floor(player_x - render_dist_blocks).to(torch.int32)
-        z0 = torch.floor(player_z - render_dist_blocks).to(torch.int32)
-        y0, y1 = 0, 256
+        # render_distance: chunks around the player (square window)
+        render_distance_chunks = int(self.config.minecraft["render_distance"])
+        margin_blocks = int(getattr(self.config.minecraft, "margin_blocks", MARGIN))  # optional
 
-        origin = torch.stack([x0, torch.full_like(x0, y0), z0], dim=1)  # [B,3]
-        spatial_shape = [2 * render_dist_blocks, y1 - y0, 2 * render_dist_blocks]
+        # player block position -> player chunk position (matches x>>4, z>>4 lookup)
+        player_block_x = torch.floor(camera_position[:, 0]).to(torch.int32)
+        player_block_z = torch.floor(camera_position[:, 2]).to(torch.int32)
+        player_chunk_x = player_block_x >> 4
+        player_chunk_z = player_block_z >> 4
+
+        # chunk-aligned origin of the render-distance window, then expand by margin (in blocks)
+        origin_block_x = ((player_chunk_x - render_distance_chunks) << 4) - margin_blocks
+        origin_block_z = ((player_chunk_z - render_distance_chunks) << 4) - margin_blocks
+
+        y_min, y_max = 0, 256
+        origin = torch.stack(
+            [origin_block_x, torch.full_like(origin_block_x, y_min), origin_block_z],
+            dim=1
+        )  # [B,3]
+
+        # (2*rd + 1) chunks => blocks, plus margin on both sides
+        window_blocks_xz = (2 * render_distance_chunks + 1) * 16 + 2 * margin_blocks
+        spatial_shape = [window_blocks_xz, y_max - y_min, window_blocks_xz]
+
         return origin, spatial_shape
+
 

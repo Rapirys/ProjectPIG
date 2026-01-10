@@ -1,15 +1,14 @@
 #!/bin/bash
+PORT="${1:-10000}"
+HOST="${2:-127.0.0.1}"
 
-# iterate until a port is open
-PORT=1044
-echo >&1 "waiting for port $PORT to be open"
+echo >&1 "waiting for ${HOST}:${PORT} to be open"
 while true; do
-
-  nc -z 127.0.0.1 $PORT
+  nc -z "$HOST" "$PORT" >/dev/null 2>&1
   if [ $? -eq 0 ]; then
     break
-  else 
-    echo >&1 "port $PORT is still closed"
+  else
+    echo >&1 "${HOST}:${PORT} is still closed"
     sleep 1
   fi
 done

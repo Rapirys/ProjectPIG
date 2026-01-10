@@ -15,9 +15,11 @@ class ReplayBuffer(object):
         self.scene_size = config
         self.use_3d_predictions = use_3d_predictions
         self.observation_shape = observation_shape
+        c, h, w = observation_shape
+        self.depth_shape = (1, h, w)
 
         self.observations = np.empty((self.capacity, *observation_shape), dtype=np.float32)
-        self.depths = np.empty((self.capacity, *observation_shape), dtype=np.float32)
+        self.depths = np.empty((self.capacity, *self.depth_shape), dtype=np.float32)
         self.actions = np.empty((self.capacity, actions_size), dtype=np.float32)
         self.rewards = np.empty((self.capacity, 1), dtype=np.float32)
         self.is_first = np.empty((self.capacity, 1), dtype=np.float32)
