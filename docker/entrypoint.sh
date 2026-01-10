@@ -9,5 +9,5 @@ cd /workspace/ProjectPIG/Malmo/Minecraft
 
 /workspace/ProjectPIG/Malmo/Minecraft/wait_for_port.sh 10000 127.0.0.1
 
-cd /workspace/ProjectPIG/NaturalDreamer
-exec python main.py --config minecraft.yml
+cd /workspace/ProjectPIG/dreamerv3-torch
+exec python dreamer.py --configs minecraft --task CustomMinecraft_findgoal --logdir ./logdir/minecraft
