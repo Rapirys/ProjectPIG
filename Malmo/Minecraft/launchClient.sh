@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # run from the script directory
+export GRADLE_USER_HOME="$(pwd)/${runDir}/gradle"
 cd "$(dirname "$0")"
 
 echo "$(dirname "$0")"
@@ -124,8 +125,8 @@ if [ ! -e build/libs/MalmoMod-0.37.0-fat.jar ] || [ "$MINERL_FORCE_BUILD" == "1"
 else
 
     export GRADLE_USER_HOME=${runDir}/gradle
-    cd $runDir
-    cmd="java -Dfml.coreMods.load=com.microsoft.Malmo.OverclockingPlugin -Xmx2G -Dfile.encoding=UTF-8 -Duser.country=US -Duser.language=en -Duser.variant -jar ../build/libs/MalmoMod-0.37.0-fat.jar"
+#    cd $runDir
+    cmd="java -Dfml.coreMods.load=com.microsoft.Malmo.OverclockingPlugin -Xmx2G -Dfile.encoding=UTF-8 -Duser.country=US -Duser.language=en -Duser.variant -jar build/libs/MalmoMod-0.37.0-fat.jar"
 fi
 # If build/libs/MalmoMod-0.37.0-fat.jar does not exist change command to 'test'
 
