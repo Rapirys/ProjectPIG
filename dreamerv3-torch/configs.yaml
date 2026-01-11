@@ -165,16 +165,15 @@ atari100k:
   time_limit: 108000
 
 minecraft:
-  task: minecraft_diamond
-  step: 1000 # True limit is 800 on env
-  parallel: False
+  step: 5000 # True limit is 1200 on env
+  parallel: True
   envs: 16
   # no eval
   eval_episode_num: 0
   eval_every: 1e4
   action_repeat: 1
   train_ratio: 16
-  video_pred_log: true
+  video_pred_log: false
   dyn_hidden: 1024
   dyn_deter: 4096
   units: 1024
@@ -195,13 +194,30 @@ memorymaze:
   imag_gradient: 'reinforce'
   task: 'memorymaze_9x9'
 
+#debug:
+#  eval_episode_num: 0
+#  time_limit: 1000
+#  actor: { layers: 5, dist: 'onehot', std: 'none' }
+#  debug: True
+#  pretrain: 1
+#  prefill: 1
+#  train_ratio: 16
+#  batch_size: 8
+#  batch_length: 8
+
 debug:
-  eval_episode_num: 0
-  time_limit: 1000
+  step: 50 # True limit is 1200 on env
+  envs: 2
   actor: { layers: 5, dist: 'onehot', std: 'none' }
+  # no eval
+  eval_episode_num: 0
+  eval_every: 1e4
+  action_repeat: 1
   debug: True
   pretrain: 1
   prefill: 1
-  train_ratio: 16
-  batch_size: 8
-  batch_length: 8
+  train_ratio: 4
+  batch_size: 4
+  batch_length: 4
+  parallel: True
+  video_pred_log: false

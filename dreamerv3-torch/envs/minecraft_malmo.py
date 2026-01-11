@@ -8,6 +8,7 @@ import numpy as np
 import torch
 
 import malmoenv
+from .launch_minecraft_in_background import launch_minecraft_in_background
 from malmoenv.world_tracking.utils import decode_world_update
 from malmoenv.world_tracking.world_buffer import WorldTrajectory
 from minecraftscc.sparse.data_preparation import visible_blocks_with_halo_numpy
@@ -61,12 +62,12 @@ class _MalmoAdapter(gym.Env):
     """Thin adapter around malmoenv.Env to expose Gymnasium 5-tuple and RGB frames."""
     metadata = {"render_modes": ["rgb_array"]}
 
-    def __init__(self, mission_xml: str, reshape: bool = True):
+    def __init__(self, mission_xml: str, reshape: bool = True, port: int = 10000):
         super().__init__()
         self._env = malmoenv.make()
         self._env.init(
             mission_xml,
-            port=10000,
+            port=port,
             server="127.0.0.1",
             role=0,
             exp_uid=None,
@@ -119,6 +120,7 @@ class MalmoMinecraft(gym.Env):
     def __init__(
         self,
         mission_xml_path: str,
+        port: int,
         repeat: int = 1,
         size: Tuple[int, int] = (64, 64),
         time_limit: int | None = None,
@@ -127,6 +129,8 @@ class MalmoMinecraft(gym.Env):
         use3d_head: bool = True,
     ):
         super().__init__()
+        mc_dir = pathlib.Path(__file__).resolve().parents[2] / "Malmo" / "Minecraft"
+        launch_minecraft_in_background(str(mc_dir), ports=[port], timeout=300, extra_args="-env")
         self._repeat = int(repeat)
         self._time_limit = int(time_limit) if time_limit else None
         self._step_count = 0
@@ -137,7 +141,7 @@ class MalmoMinecraft(gym.Env):
         self.device = device
 
         mission_xml = pathlib.Path(mission_xml_path).read_text()
-        self._env = _MalmoAdapter(mission_xml, reshape=True)
+        self._env = _MalmoAdapter(mission_xml, reshape=True, port=port)
 
         # Observation space: force RGB only (H,W,3)
         H, W, C = self._env.observation_space.shape

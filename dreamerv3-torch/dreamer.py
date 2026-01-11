@@ -147,59 +147,11 @@ def make_dataset(episodes, config):
 
 def make_env(config, mode, id):
     suite, task = config.task.split("_", 1)
-    #TODO Only support dmc
-    if suite == "dmc":
-        import envs.dmc as dmc
-
-        env = dmc.DeepMindControl(
-            task, config.action_repeat, config.size, seed=config.seed + id
-        )
-        env = wrappers.NormalizeActions(env)
-    elif suite == "atari":
-        import envs.atari as atari
-
-        env = atari.Atari(
-            task,
-            config.action_repeat,
-            config.size,
-            gray=config.grayscale,
-            noops=config.noops,
-            lives=config.lives,
-            sticky=config.stickey,
-            actions=config.actions,
-            resize=config.resize,
-            seed=config.seed + id,
-        )
-        env = wrappers.OneHotAction(env)
-    elif suite == "dmlab":
-        import envs.dmlab as dmlab
-
-        env = dmlab.DeepMindLabyrinth(
-            task,
-            mode if "train" in mode else "test",
-            config.action_repeat,
-            seed=config.seed + id,
-        )
-        env = wrappers.OneHotAction(env)
-    elif suite == "memorymaze":
-        from envs.memorymaze import MemoryMaze
-
-        env = MemoryMaze(task, seed=config.seed + id)
-        env = wrappers.OneHotAction(env)
-    elif suite == "crafter":
-        import envs.crafter as crafter
-
-        env = crafter.Crafter(task, config.size, seed=config.seed + id)
-        env = wrappers.OneHotAction(env)
-    elif suite == "minecraft":
-        import envs.minecraft as minecraft
-
-        env = minecraft.make_env(task, size=config.size, break_speed=config.break_speed)
-        env = wrappers.OneHotAction(env)
-    elif suite == "CustomMinecraft":
+    if suite == "CustomMinecraft":
         from envs.minecraft_malmo import MalmoMinecraft
         env = MalmoMinecraft(
             mission_xml_path="Malmo/MalmoEnv/missions/findthegoalexteme.xml",
+            port = 10000 + id,
             repeat=config.action_repeat,
             size=config.size,
             time_limit=None,
@@ -248,14 +200,16 @@ def main(config):
         directory = config.offline_evaldir.format(**vars(config))
     else:
         directory = config.evaldir
+    print("Load saved episodes.")
     eval_eps = tools.load_episodes(directory, limit=1)
+    print("Done loading saved episodes.")
     make = lambda mode, id: make_env(config, mode, id)
-    train_envs = [make("train", i) for i in range(config.envs)]
-    eval_envs = [make("eval", i) for i in range(config.envs)]
     if config.parallel:
-        train_envs = [Parallel(env, "process") for env in train_envs]
-        eval_envs = [Parallel(env, "process") for env in eval_envs]
+        train_envs = [Parallel(lambda i=i: make("train", i), "process") for i in range(config.envs)]
+        eval_envs = [Parallel(lambda i=i: make("eval", i), "process") for i in range(config.envs)]
     else:
+        train_envs = [make("train", i) for i in range(config.envs)]
+        eval_envs = [make("eval", i) for i in range(config.envs)]
         train_envs = [Damy(env) for env in train_envs]
         eval_envs = [Damy(env) for env in eval_envs]
     acts = train_envs[0].action_space

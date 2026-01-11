@@ -38,7 +38,8 @@ def _port_has_listener(port):
     return result == 0
 
 
-def launch_minecraft_in_background(minecraft_path, ports=None, timeout=360, replaceable=False, score=False):
+def launch_minecraft_in_background(minecraft_path, ports=None, timeout=360, replaceable=False, score=False, extra_args=""):
+    print(f"Launching Minecraft on port {ports}")
     if ports is None:
         ports = []
     if len(ports) == 0:
@@ -51,10 +52,11 @@ def launch_minecraft_in_background(minecraft_path, ports=None, timeout=360, repl
         replaceable_arg = " -replaceable " if replaceable else ""
         scorepolicy_arg = " -scorepolicy " if score else ""
         scorepolicy_value = " 2 " if score else ""
+        extra = (" " + extra_args.strip()) if extra_args else ""
         print('Nothing is listening on port', port, '- will attempt to launch Minecraft from a new terminal.')
         if os.name == 'nt':
             args = [minecraft_path + '/launchClient.bat', '-port', str(port), replaceable_arg.strip(),
-                    scorepolicy_arg.strip(), scorepolicy_value.strip()]
+                    scorepolicy_arg.strip(), scorepolicy_value.strip()] + (extra_args.split() if extra_args else [])
             p = subprocess.Popen([arg for arg in args if arg != ""],
                                  creationflags=subprocess.CREATE_NEW_CONSOLE, close_fds=True)
         elif sys.platform == 'darwin':
@@ -66,15 +68,17 @@ def launch_minecraft_in_background(minecraft_path, ports=None, timeout=360, repl
             launcher_file = "/tmp/launcher_" + str(os.getpid()) + ".sh"
             tmp_file = open(launcher_file, "w")
             tmp_file.write(minecraft_path + '/launchClient.sh -port ' + str(port) +
-                           replaceable_arg + scorepolicy_arg + scorepolicy_value)
+                           replaceable_arg + scorepolicy_arg + scorepolicy_value + extra)
             tmp_file.close()
             os.chmod(launcher_file, 0o700)
             p = subprocess.Popen(['open', '-a', 'Terminal.app', launcher_file])
         else:
+            os.makedirs(os.path.join(minecraft_path, "logs"), exist_ok=True)
+            logfile = os.path.join(minecraft_path, "logs", f"minecraft_{port}.log")
             p = subprocess.Popen(minecraft_path + "/launchClient.sh -port " + str(port) +
-                                 replaceable_arg + scorepolicy_arg + scorepolicy_value,
-                                 close_fds=True, shell=True,
-                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                 replaceable_arg + scorepolicy_arg + scorepolicy_value + extra +
+                                 f" > {logfile} 2>&1",
+                                 close_fds = True, shell = True)
         processes.append(p)
         print('Giving Minecraft some time to launch... ')
         launched = False
@@ -93,7 +97,12 @@ def launch_minecraft_in_background(minecraft_path, ports=None, timeout=360, repl
 
 if __name__ == "__main__":
     minecraft_launch_path = os.path.dirname(os.path.abspath(__file__))
-    launch_ports = [int(port_arg) for port_arg in sys.argv[1:] if port_arg != "--replaceable" and port_arg != "--score"]
+    launch_ports = [int(port_arg) for port_arg in sys.argv[1:] if port_arg != "--replaceable" and port_arg != "--score" and port_arg != "--extra"]
+    extra_args = ""
+    if "--extra" in sys.argv:
+        i = sys.argv.index("--extra")
+        extra_args = " ".join(sys.argv[i + 1:])
     launch_minecraft_in_background(minecraft_launch_path, launch_ports, 300,
                                    replaceable="--replaceable" in sys.argv,
-                                   score="--score" in sys.argv)
+                                   score="--score" in sys.argv,
+                                   extra_args=extra_args)
