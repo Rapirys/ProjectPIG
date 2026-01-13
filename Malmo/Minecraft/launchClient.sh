@@ -125,6 +125,7 @@ if [ ! -e build/libs/MalmoMod-0.37.0-fat.jar ] || [ "$MINERL_FORCE_BUILD" == "1"
 else
 #    cd $runDir
     mkdir -p "$runDir/saves" "$runDir/logs" "$runDir/config"
+    cp -n options.txt "$runDir/options.txt"
     cmd="java -Dfml.coreMods.load=com.microsoft.Malmo.OverclockingPlugin \
               -Xmx2G -Dfile.encoding=UTF-8 -Duser.country=US -Duser.language=en \
               -jar build/libs/MalmoMod-0.37.0-fat.jar \
