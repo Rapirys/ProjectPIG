@@ -9,16 +9,16 @@ __pycache__/
 .ipynb_checkpoints/
 logdir/
 
-Malmo/Minecraft/run/config/malmomodCLIENT.cfg
+Malmo/Minecraft/run*/config/malmomodCLIENT.cfg
 Malmo/Minecraft/Minecraft_Client.launch
 
 .vscode/
-Malmo/Minecraft/run/saves
-Malmo/Minecraft/run/logs
-Malmo/Minecraft/run/readme.txt
-Malmo/Minecraft/run/user*
-Malmo/Minecraft/run/.mixin.out
-Malmo/Minecraft/run/config/splash.properties
+Malmo/Minecraft/run*/saves
+Malmo/Minecraft/run*/logs
+Malmo/Minecraft/run*/readme.txt
+Malmo/Minecraft/run*/user*
+Malmo/Minecraft/run*/.mixin.out
+Malmo/Minecraft/run*/config/splash.properties
 Malmo/Malmo/samples/Python_examples/.fuse_hidden*
 MMalmo/Malmo/samples/Python_examples/MalmoPython.so
 Malmo/Minecraft/logs/
