@@ -13,6 +13,7 @@ Malmo/Minecraft/run/config/malmomodCLIENT.cfg
 Malmo/Minecraft/Minecraft_Client.launch
 
 .vscode/
+Malmo/Minecraft/run/saves
 Malmo/Minecraft/run/logs
 Malmo/Minecraft/run/readme.txt
 Malmo/Minecraft/run/user*

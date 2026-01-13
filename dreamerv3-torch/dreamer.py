@@ -206,10 +206,10 @@ def main(config):
     make = lambda mode, id: make_env(config, mode, id)
     if config.parallel:
         train_envs = [Parallel(lambda i=i: make("train", i), "process") for i in range(config.envs)]
-        eval_envs = [Parallel(lambda i=i: make("eval", i), "process") for i in range(config.envs)]
+        eval_envs = []
     else:
         train_envs = [make("train", i) for i in range(config.envs)]
-        eval_envs = [make("eval", i) for i in range(config.envs)]
+        eval_envs = []
         train_envs = [Damy(env) for env in train_envs]
         eval_envs = [Damy(env) for env in eval_envs]
     acts = train_envs[0].action_space

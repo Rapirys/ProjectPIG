@@ -73,9 +73,11 @@ def launch_minecraft_in_background(minecraft_path, ports=None, timeout=360, repl
             os.chmod(launcher_file, 0o700)
             p = subprocess.Popen(['open', '-a', 'Terminal.app', launcher_file])
         else:
+            run_dir = f"run_{port}"
             os.makedirs(os.path.join(minecraft_path, "logs"), exist_ok=True)
             logfile = os.path.join(minecraft_path, "logs", f"minecraft_{port}.log")
             p = subprocess.Popen(minecraft_path + "/launchClient.sh -port " + str(port) +
+                                 " -runDir " + run_dir +
                                  replaceable_arg + scorepolicy_arg + scorepolicy_value + extra +
                                  f" > {logfile} 2>&1",
                                  close_fds = True, shell = True)
