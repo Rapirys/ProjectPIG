@@ -155,11 +155,11 @@ class WorldModel(nn.Module):
                     losses[name] = loss
                 if "depth" in aux:
                      loss = networks.DepthHead.loss(aux["depth"], data["depth"])
-                     losses["depth"] = loss[None, None].expand(embed.shape[:2])
+                     losses["depth"] = loss[None, None].expand(embed.shape[:2]) #TODO remove broadcasting
 
                 if "decoder3d" in aux:
                      loss = aux["decoder3d"]
-                     losses["decoder3d"] = loss[None, None].expand(embed.shape[:2])
+                     losses["decoder3d"] = loss[None, None].expand(embed.shape[:2])#TODO remove broadcasting
 
                 scaled = {
                     key: value * self._scales.get(key, 1.0)

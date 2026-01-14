@@ -115,4 +115,4 @@ def lognormal_mdn_nll_loss(
     log_weights = torch.log(mixture_weights.clamp_min(min_prob))  # [N, K, H, W]
     # log Σ_k pi_k * LogNormal_k(d)  (stable)
     log_mixture_pdf = torch.logsumexp(log_weights + log_component_pdf, dim=1)  # [N, H, W]
-    return (-log_mixture_pdf).mean()
+    return (-log_mixture_pdf).mean() #TODO replace lognormall loss with linear

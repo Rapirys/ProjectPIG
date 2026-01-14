@@ -100,7 +100,7 @@ defaults:
     feature_size: 32
     num_components: 3
     min_scale: 1.0e-3
-    loss_scale: 256
+    loss_scale: 128
 
   minecraft:
     classes: 236
@@ -109,7 +109,7 @@ defaults:
       dilations: [ 1, 2, 3 ]
     projection_scale: 1
     render_distance: 4
-    loss_scale: 256
+    loss_scale: 128
 
 
 dmc_proprio:
@@ -172,6 +172,31 @@ minecraft:
   eval_episode_num: 0
   eval_every: 1e4
   action_repeat: 1
+  train_ratio: 64
+  video_pred_log: false
+  dyn_hidden: 1024
+  dyn_deter: 4096
+  units: 1024
+  encoder: {mlp_keys: 'inventory|inventory_max|equipped|health|hunger|breath|obs_reward', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
+  decoder: {mlp_keys: 'inventory|inventory_max|equipped|health|hunger|breath', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
+  actor: {layers: 5, dist: 'onehot', std: 'none'}
+  value: {layers: 5}
+  reward_head: {layers: 5}
+  cont_head: {layers: 5}
+  imag_gradient: 'reinforce'
+  break_speed: 100.0
+  time_limit: 36000
+  batch_size: 8
+  batch_length: 16
+
+minecraft-native:
+  step: 5000 # True limit is 1200 on env
+  parallel: True
+  envs: 16
+  # no eval
+  eval_episode_num: 0
+  eval_every: 1e4
+  action_repeat: 1
   train_ratio: 16
   video_pred_log: false
   dyn_hidden: 1024
@@ -186,6 +211,8 @@ minecraft:
   imag_gradient: 'reinforce'
   break_speed: 100.0
   time_limit: 36000
+  use3dHead: False
+
 
 memorymaze:
   steps: 1e8
