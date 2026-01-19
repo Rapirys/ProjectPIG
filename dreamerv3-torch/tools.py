@@ -169,7 +169,8 @@ def simulate(
 
         # step agents
         obs_batch = {k: np.stack([o[k] for o in obs]) for k in obs[0] if "log_" not in k}
-        action, agent_state = agent(obs_batch, done, agent_state)
+        policy = getattr(agent, "policy", agent)
+        action, agent_state = policy(obs_batch, done, agent_state, training=not is_eval)
         if isinstance(action, dict):
             action = [
                 {k: np.array(action[k][i].detach().cpu()) for k in action}
@@ -179,8 +180,12 @@ def simulate(
             action = np.array(action)
         assert len(action) == len(envs)
         # step envs
-        results = [e.step(a) for e, a in zip(envs, action)]
-        results = [r() for r in results]
+        # dispatch env steps
+        futers = [e.step(a) for e, a in zip(envs, action)]
+        if not is_eval and hasattr(agent, "train_updates"):
+            agent.train_updates(done)
+        results = [f() for f in futers]
+
         obs_step, reward_step, terminated, truncated, _ = zip(*results)
         obs = list(obs_step)
         reward = list(reward_step)

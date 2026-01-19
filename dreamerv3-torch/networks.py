@@ -969,3 +969,24 @@ class Sparse3DHead(nn.Module):
             target_coords_world,
         )
         return sparse_ce_loss(logits, target_labels)
+
+
+def make_depth_out_from_gt(data, device, k=3):
+    depth = data["depth"]  # [B,T,1,H,W] or [B,T,H,W]
+    b, t = depth.shape[:2]
+    d = depth.reshape(b * t, *depth.shape[2:])
+    if d.dim() == 4:   # [bt,1,H,W]
+        d = d[:, 0]
+    d = d.to(device).clamp_min(1e-10)
+
+    bt, h, w = d.shape
+    mw = d.new_zeros((bt, k, h, w)); mw[:, 0] = 1.0
+    mu = d.log().unsqueeze(1).expand(bt, k, h, w)
+    sig = d.new_zeros((bt, k, h, w))
+
+    mdn = (mw.view(b, t, k, h, w),
+           mu.view(b, t, k, h, w),
+           sig.view(b, t, k, h, w))
+
+    empty_features = d.new_empty((b, t, 0, h, w))
+    return mdn, empty_features

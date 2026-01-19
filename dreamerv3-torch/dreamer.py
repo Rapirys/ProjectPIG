@@ -58,32 +58,33 @@ class Dreamer(nn.Module):
         )[config.expl_behavior]().to(self._config.device)
 
     def __call__(self, obs, reset, state=None, training=True):
+        if training:
+            self.train_updates(reset)
+        return self.policy(obs, reset, state, training)
+
+    def train_updates(self, reset):
         step = self._step
-        if training:
-            steps = (
-                self._config.pretrain
-                if self._should_pretrain()
-                else self._should_train(step)
-            )
-            for _ in range(steps):
-                self._train(next(self._dataset))
-                self._update_count += 1
-                self._metrics["update_count"] = self._update_count
-            if self._should_log(step):
-                for name, values in self._metrics.items():
-                    self._logger.scalar(name, float(np.mean(values)))
-                    self._metrics[name] = []
-                if self._config.video_pred_log:
-                    openl = self._wm.video_pred(next(self._dataset))
-                    self._logger.video("train_openl", to_np(openl))
-                self._logger.write(fps=True)
+        steps = self._config.pretrain if self._should_pretrain() else self._should_train(step)
+        for _ in range(steps):
+            self._train(next(self._dataset))
+            self._update_count += 1
+            self._metrics["update_count"] = self._update_count
+        if self._should_log(step):
+            for name, values in self._metrics.items():
+                self._logger.scalar(name, float(np.mean(values)))
+                self._metrics[name] = []
 
-        policy_output, state = self._policy(obs, state, training)
+            if self._config.video_pred_log:
+                openl = self._wm.video_pred(next(self._dataset))
+                self._logger.video("train_openl", to_np(openl))
+            self._logger.write(fps=True)
 
-        if training:
-            self._step += len(reset)
-            self._logger.step = self._config.action_repeat * self._step
-        return policy_output, state
+        self._step += len(reset)
+        self._logger.step = self._config.action_repeat * self._step
+
+    def policy(self, obs, reset, state=None, training=True):
+        return self._policy(obs, state, training)
+
 
     def _policy(self, obs, state, training):
         if state is None:
@@ -156,7 +157,7 @@ def make_env(config, mode, id):
             size=config.size,
             time_limit=None,
             max_target_blocks_3d=config.max_target_blocks_3d,
-            device=config.device,
+            device=config.device, #'cpu',
             use3d_head=config.use3dHead,
         )
         env = wrappers.OneHotAction(env)
@@ -233,7 +234,7 @@ def main(config):
                 1,
             )
 
-        def random_agent(o, d, s):
+        def random_agent(o, d, s, training=True):
             action = random_actor.sample()
             logprob = random_actor.log_prob(action)
             return {"action": action, "logprob": logprob}, None

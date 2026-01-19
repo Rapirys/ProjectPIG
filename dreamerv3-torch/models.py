@@ -85,7 +85,11 @@ class WorldModel(nn.Module):
             name="Cont",
         )
         if getattr(config, "use3dHead", True): #TODO get rid of use3dHead and relly on config.gradHeads
-            self.heads["depth"] = networks.DepthHead(feat_size, config).to(config.device)
+            if not config.depth_head.get("use_gt", False):
+               self.heads["depth"] = networks.DepthHead(feat_size, config).to(config.device)
+            else:
+                assert config.depth_head["feature_size"] == 0
+                assert config.depth_head["num_components"] == 1
             self.heads["decoder3d"] = networks.Sparse3DHead(feat_size, config).to(config.device)
 
         for name in config.grad_heads:
@@ -141,7 +145,11 @@ class WorldModel(nn.Module):
                         aux["depth"] = head(feat)
                         continue
                     if name == "decoder3d":
-                        aux["decoder3d"] = head(feat, aux["depth"], data)
+                        if self._config.depth_head.get("use_gt", False):
+                            depth_out = networks.make_depth_out_from_gt(data, device=feat.device, k = 1)
+                        else:
+                            depth_out = aux["depth"]
+                        aux["decoder3d"] = head(feat, depth_out, data)
                         continue
                     pred = head(feat)
                     if type(pred) is dict:
@@ -196,7 +204,7 @@ class WorldModel(nn.Module):
         obs = { k: torch.tensor(v, device=self._config.device, dtype = (
                                 torch.int32 if k == "coords" else
                                 torch.bool if k in ("valid_mask", "direct_mask") else
-                                torch.float32))for k, v in obs.items()
+                                torch.float32)).to(self._config.device, non_blocking=True) for k, v in obs.items()
         }
         obs["image"] = obs["image"] / 255.0
         if "discount" in obs:

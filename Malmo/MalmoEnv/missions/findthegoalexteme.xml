@@ -31,7 +31,7 @@
             <LowLevelInputs>true</LowLevelInputs>
             <Inventory>
                 <!-- 1 ender pearl -->
-                <InventoryObject slot="0" type="ender_pearl" quantity="1"  metadata="0"/>
+                <InventoryObject slot="0" type="diamond_pickaxe" quantity="1" metadata="0"/>
                 <!-- stack of blocks (stone) -->
                 <InventoryObject slot="1" type="stone" quantity="64"  metadata="0"/>
                 <!-- 1 speed potion -->
@@ -62,13 +62,13 @@
             <RewardForTimeTaken initialReward="-0.01" delta="0" density="PER_TICK"/>
             <RewardForDistanceTraveledToCompassTarget rewardPerBlock="0.009" density="PER_TICK"/>
             <RewardForTouchingBlockType>
-                <Block type="diamond_block" reward="0.5"/>
+                <Block type="diamond_block" reward="2" behaviour="onceOnly"/>
             </RewardForTouchingBlockType>
             <AgentQuitFromTouchingBlockType>
                 <Block type="diamond_block" description="found_goal"/>
             </AgentQuitFromTouchingBlockType>
             <AgentQuitFromReachingCommandQuota description="step_limit">
-                <Quota commands="forward" quota="1200"/>
+                <Quota commands="forward" quota="2400"/>
             </AgentQuitFromReachingCommandQuota>
             <MissionQuitCommands/>
 
