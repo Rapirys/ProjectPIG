@@ -52,9 +52,12 @@ public class RewardForDistanceTraveledToCompassTargetImplementation extends Rewa
         EntityPlayerSP player = Minecraft.getMinecraft().player;
         BlockPos spawn = player.world.getSpawnPoint();
         Vec3d playerLoc = player.getPositionVector();
-        Vec3d spawnPos = new Vec3d(spawn.getX(), spawn.getY(), spawn.getZ());
 
-        double currentDistance = playerLoc.distanceTo(spawnPos);
+        double dx = playerLoc.xCoord - (spawn.getX() + 0.5);
+        double dz = playerLoc.zCoord - (spawn.getZ() + 0.5);
+        double currentDistance = Math.sqrt(dx * dx + dz * dz);
+
+
         float delta = !positionInitialized  ? 0.0f : (float)(this.previousDistance - currentDistance);
         
         switch (this.params.getDensity()) {
