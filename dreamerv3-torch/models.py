@@ -1,6 +1,8 @@
 import copy
+from typing import Any
+
 import torch
-from torch import nn
+from torch import nn, Tensor
 
 import networks
 import tools
@@ -137,21 +139,21 @@ class WorldModel(nn.Module):
                 assert kl_loss.shape == embed.shape[:2], kl_loss.shape
                 preds = {}
                 aux = {}
+                feat = self.dynamics.get_feat(post)
                 for name, head in self.heads.items():
                     grad_head = name in self._config.grad_heads
-                    feat = self.dynamics.get_feat(post)
-                    feat = feat if grad_head else feat.detach()
+                    feat_in = feat if grad_head else feat.detach()
                     if name == "depth":
-                        aux["depth"] = head(feat)
+                        aux["depth"] = head(feat_in)
                         continue
                     if name == "decoder3d":
                         if self._config.depth_head.get("use_gt", False):
-                            depth_out = networks.make_depth_out_from_gt(data, device=feat.device, k = 1)
+                            depth_out = networks.make_depth_out_from_gt(data, device=feat_in.device, k = 1)
                         else:
                             depth_out = aux["depth"]
-                        aux["decoder3d"] = head(feat, depth_out, data)
+                        aux["decoder3d"] = head(feat_in, depth_out, data)
                         continue
-                    pred = head(feat)
+                    pred = head(feat_in)
                     if type(pred) is dict:
                         preds.update(pred)
                     else:
@@ -174,9 +176,11 @@ class WorldModel(nn.Module):
                     for key, value in losses.items()
                 }
                 model_loss = sum(scaled.values()) + kl_loss
+                grad_metrics= self._gradient_metrics(feat, scaled)
             metrics = self._model_opt(torch.mean(model_loss), self.parameters())
 
         metrics.update({f"{name}_loss": to_np(loss) for name, loss in losses.items()})
+        metrics.update(grad_metrics)
         metrics["kl_free"] = kl_free
         metrics["dyn_scale"] = dyn_scale
         metrics["rep_scale"] = rep_scale
@@ -198,6 +202,7 @@ class WorldModel(nn.Module):
             )
         post = {k: v.detach() for k, v in post.items()}
         return post, context, metrics
+
 
     # this function is called during both rollout and training
     def preprocess(self, obs):
@@ -241,6 +246,20 @@ class WorldModel(nn.Module):
 
         return torch.cat([truth, model, error], 2)
 
+
+    def _gradient_metrics(self, feat: Tensor, scaled: dict[Any, float | Any]):
+        out = {}
+        if "image" in scaled and "decoder3d" in scaled:
+            l_img = torch.mean(scaled["image"])
+            l_3d = torch.mean(scaled["decoder3d"])
+
+            g_img = torch.autograd.grad(l_img, feat, retain_graph=True, allow_unused=True)[0]
+            g_3d = torch.autograd.grad(l_3d, feat, retain_graph=True, allow_unused=True)[0]
+
+            if g_img is not None and g_3d is not None:
+                s = tools.grad_stats(g_img.float().reshape(-1), g_3d.float().reshape(-1))
+                out.update({f"decoder_vs_decoder3d_{k}": v for k, v in s.items()})
+        return out
 
 class ImagBehavior(nn.Module):
     def __init__(self, config, world_model):

@@ -1013,3 +1013,16 @@ def recursively_load_optim_state_dict(obj, optimizers_state_dicts):
         for key in keys:
             obj_now = getattr(obj_now, key)
         obj_now.load_state_dict(state_dict)
+
+
+@torch.no_grad()
+def grad_stats(g1, g2, eps=1e-12):
+    n1 = g1.norm().clamp_min(eps)
+    n2 = g2.norm().clamp_min(eps)
+    cos = torch.dot(g1, g2) / (n1 * n2)
+    return {
+        "g1_norm": n1.item(),
+        "g2_norm": n2.item(),
+        "cosine": cos.item(),
+        "ratio_g2_over_g1": (n2 / n1).item(),
+    }

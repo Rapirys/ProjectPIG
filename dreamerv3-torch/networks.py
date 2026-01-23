@@ -933,6 +933,14 @@ class Sparse3DHead(nn.Module):
         self.head = SparseMinecraftSegmentationHead(config, config.device, self.classes).to(config.device)
         self.model = Decoder3dSparse(decoder, self.head)
 
+        self.class_weights = None
+        cw = config.minecraft.get("class_weights", {})
+        if cw:
+            w = torch.ones(self.classes, dtype=torch.float32)
+            for k, v in cw.items():
+                w[int(k)] = float(v)
+            self.class_weights = w.to(config.device)
+
     def forward(self, feat, depth_out, data):
         (mw, mu, sig), depth_features = depth_out
         b, t, _ = feat.shape
@@ -945,6 +953,7 @@ class Sparse3DHead(nn.Module):
 
         coords = data["coords"].reshape(bt, data["coords"].shape[2], 4)
         valid = data["valid_mask"].reshape(bt, data["valid_mask"].shape[2])
+        direct_mask = data["direct_mask"].reshape(bt, data["direct_mask"].shape[2])
 
         target_xyz_world, target_labels = coords[..., :3], coords[..., 3]
 
@@ -953,6 +962,7 @@ class Sparse3DHead(nn.Module):
         batch_time_ids = batch_time_ids[valid]
         target_xyz_world = target_xyz_world[valid]
         target_labels = target_labels[valid]
+        direct_mask = direct_mask[valid]
 
 
         target_coords_world = torch.cat([batch_time_ids[:, None], target_xyz_world], dim=1)
@@ -968,7 +978,7 @@ class Sparse3DHead(nn.Module):
             projection_metrix,
             target_coords_world,
         )
-        return sparse_ce_loss(logits, target_labels)
+        return sparse_ce_loss(logits, target_labels, direct_mask=direct_mask, direct_coef=5.0, class_weights=self.class_weights)
 
 
 def make_depth_out_from_gt(data, device, k=3):

@@ -69,7 +69,7 @@ defaults:
   model_lr: 1e-4
   opt_eps: 1e-8
   grad_clip: 1000
-  dataset_size: 1000000
+  dataset_size: 500000
   opt: 'adam'
 
   # Behavior.
@@ -111,6 +111,8 @@ defaults:
     projection_scale: 1
     render_distance: 4
     loss_scale: 128
+    class_weights:
+      57: 10.0
 
 
 dmc_proprio:
@@ -166,7 +168,7 @@ atari100k:
   time_limit: 108000
 
 minecraft:
-  step: 5000 # True limit is 1200 on env
+  step: 5000 # True limit is 2400 on env  #TODO nor needed
   parallel: True
   envs: 16
   # no eval
@@ -185,10 +187,11 @@ minecraft:
   reward_head: {layers: 5}
   cont_head: {layers: 5}
   imag_gradient: 'reinforce'
-  break_speed: 100.0
+  break_speed: 100.0 #TODO nor needed
   time_limit: 36000
-  batch_size: 8
-  batch_length: 24
+  model_lr: 6.12e-05
+  batch_size: 12
+  batch_length: 32
 
 minecraft-native:
   step: 5000 # True limit is 1200 on env
@@ -235,7 +238,7 @@ memorymaze:
 
 debug:
   step: 50 # True limit is 1200 on env
-  envs: 2
+  envs: 1
   actor: { layers: 5, dist: 'onehot', std: 'none' }
   # no eval
   eval_episode_num: 0
@@ -248,4 +251,6 @@ debug:
   batch_size: 4
   batch_length: 8
   parallel: True
-  video_pred_log: false
+  dataset_size: 10000
+  video_pred_log: true
+  log_every: 1e3

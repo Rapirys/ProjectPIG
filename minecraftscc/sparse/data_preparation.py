@@ -60,29 +60,37 @@ def backproject_visible_points_from_depth(
 
 
 def halo_around_visible_blocks_torch(
-    visible_coords: torch.Tensor,                 # [N,4] int32 (batch,x,y,z)
-    halo_size: Tuple[int, int, int] = (5, 5, 5) # (sx,sy,sz), includes center
+    visible_coords: torch.Tensor,                # [N,4] int32 (batch,x,y,z)
+    halo_size: Tuple[int, int, int] = (5, 5, 5), # (sx,sy,sz)
+    num_halo_coords: int = 0,                    # how many halo coords to generate total
+    rng: torch.Generator | None = None,
 ) -> torch.Tensor:
-    """Returns (possibly with duplicates) halo coords: int32 [N*Q,4] (batch,x,y,z)."""
-    if visible_coords.numel() == 0:
-        return visible_coords
+    """
+    Sample exactly `num_halo_coords` halo candidates (with replacement) around `visible_coords`.
+    Returns int32 [M,4] (batch,x,y,z). You should concatenate with visible_coords and unique once.
+    """
+    if visible_coords.numel() == 0 or num_halo_coords <= 0:
+        return visible_coords.new_empty((0, 4))
 
     device = visible_coords.device
+    num_visible = int(visible_coords.shape[0])
+
     sx, sy, sz = halo_size
     rx, ry, rz = sx // 2, sy // 2, sz // 2
 
-    ox = torch.arange(-rx, rx + 1, device=device, dtype=torch.int32)
-    oy = torch.arange(-ry, ry + 1, device=device, dtype=torch.int32)
-    oz = torch.arange(-rz, rz + 1, device=device, dtype=torch.int32)
-    offsets = torch.stack(torch.meshgrid(ox, oy, oz, indexing="ij"), dim=-1).view(-1, 3)  # [Q,3]
+    offset_x = torch.arange(-rx, rx + 1, device=device, dtype=torch.int32)
+    offset_y = torch.arange(-ry, ry + 1, device=device, dtype=torch.int32)
+    offset_z = torch.arange(-rz, rz + 1, device=device, dtype=torch.int32)
+    offsets_xyz = torch.stack(torch.meshgrid(offset_x, offset_y, offset_z, indexing="ij"),dim=-1).view(-1, 3)  # [Q,3]
 
-    batches = visible_coords[:, :1]   # [N,1]
-    xyz = visible_coords[:, 1:] # [N,3]
+    num_offsets = int(offsets_xyz.shape[0])
 
-    halo_xyz = xyz[:, None, :] + offsets[None, :, :]                 # [N,Q,3]
-    halo_b = batches[:, None, :].expand(-1, offsets.shape[0], -1)          # [N,Q,1]
-    halo_coords = torch.cat([halo_b, halo_xyz], dim=2).reshape(-1, 4) # [N*Q,4]
-    return halo_coords
+    visible_indices = torch.randint(low=0, high=num_visible, size=(int(num_halo_coords),), device=device, generator=rng)
+    offset_indices = torch.randint(low=0, high=num_offsets,size=(int(num_halo_coords),), device=device, generator=rng)
+
+    halo_batch = visible_coords[visible_indices, :1]              # [M,1]
+    halo_xyz = visible_coords[visible_indices, 1:] + offsets_xyz[offset_indices]  # [M,3]
+    return torch.cat([halo_batch, halo_xyz], dim=1)               # [M,4]
 
 def backproject_visible_blocks_from_depth(
     depth_camera_z: torch.Tensor,   # [B,H,W]
@@ -126,13 +134,13 @@ def backproject_visible_blocks_from_depth(
 
 
 @torch.no_grad()
-def visible_blocks_with_halo_numpy(
+def visible_blocks_with_halo(
     depth_camera_z: torch.Tensor,   # [B,H,W]
     camera_position: torch.Tensor,
     model_view_metrix: torch.Tensor,
     projection_metrix: torch.Tensor,
     halo_size: Tuple[int, int, int] = (1, 1, 1),
-) -> Tuple[np.ndarray, np.ndarray]:
+):
     B = depth_camera_z.shape[0]
     if model_view_metrix.ndim == 2:
         model_view_metrix = model_view_metrix.unsqueeze(0).expand(B, -1, -1).contiguous()
@@ -140,14 +148,29 @@ def visible_blocks_with_halo_numpy(
         projection_metrix = projection_metrix.unsqueeze(0).expand(B, -1, -1).contiguous()
 
     visible_coords, _ = backproject_visible_blocks_from_depth(depth_camera_z, camera_position, model_view_metrix, projection_metrix)
-    halo_coords = halo_around_visible_blocks_torch(visible_coords, halo_size=halo_size)  # torch [N*Q,4]
+    if halo_size == (1, 1, 1):  # skip halo
+        all_coords = torch.unique(visible_coords, dim=0)
+        direct_mask = torch.ones(all_coords.shape[0], device=all_coords.device, dtype=torch.bool)
+        return all_coords, direct_mask
 
-    all_coords, inv = torch.unique(torch.cat([visible_coords, halo_coords], dim=0), dim=0, return_inverse=True)
+    halo = halo_around_visible_blocks_torch(visible_coords, halo_size=halo_size, num_halo_coords=2048) #TODO to config
+    all_coords, inv  = torch.unique(torch.cat([visible_coords, halo], 0), dim=0, return_inverse=True)
 
     n_vis = visible_coords.shape[0]
     direct_mask = torch.zeros(all_coords.shape[0], device=all_coords.device, dtype=torch.bool)
     direct_mask[inv[:n_vis]] = True
 
+    return all_coords, direct_mask
+
+@torch.no_grad()
+def visible_blocks_with_halo_numpy(
+    depth_camera_z: torch.Tensor,   # [B,H,W]
+    camera_position: torch.Tensor,
+    model_view_metrix: torch.Tensor,
+    projection_metrix: torch.Tensor,
+    halo_size: Tuple[int, int, int] = (1, 1, 1),
+) -> Tuple[np.ndarray, np.ndarray]:
+    all_coords, direct_mask = visible_blocks_with_halo(depth_camera_z, camera_position, model_view_metrix, projection_metrix, halo_size)
     return (
         all_coords.cpu().numpy().astype(np.int32, copy=False),
         direct_mask.cpu().numpy()

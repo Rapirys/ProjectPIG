@@ -59,8 +59,7 @@
 <!--            <ContinuousMovementCommands turnSpeedDegs="180">-->
 <!--            </ContinuousMovementCommands>-->
             <HumanLevelCommands/>
-            <RewardForTimeTaken initialReward="-0.01" delta="0" density="PER_TICK"/>
-            <RewardForDistanceTraveledToCompassTarget rewardPerBlock="0.009" density="PER_TICK"/>
+            <RewardForDistanceTraveledToCompassTarget rewardPerBlock="0.05" density="PER_TICK"/>
             <RewardForTouchingBlockType>
                 <Block type="diamond_block" reward="2" behaviour="onceOnly"/>
             </RewardForTouchingBlockType>
