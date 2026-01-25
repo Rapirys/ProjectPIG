@@ -7,7 +7,7 @@ defaults:
   offline_evaldir: ''
   seed: 0
   deterministic_run: False
-  steps: 1e6
+  steps: 2e6
   parallel: False
   eval_every: 1e4
   eval_episode_num: 10
@@ -183,15 +183,44 @@ minecraft:
   encoder: {mlp_keys: 'inventory|inventory_max|equipped|health|hunger|breath|obs_reward', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
   decoder: {mlp_keys: 'inventory|inventory_max|equipped|health|hunger|breath', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
   actor: {layers: 5, dist: 'onehot', std: 'none'}
+  grad_heads: ['decoder', 'reward', 'cont', 'decoder3d']
   value: {layers: 5}
   reward_head: {layers: 5}
   cont_head: {layers: 5}
   imag_gradient: 'reinforce'
   break_speed: 100.0 #TODO nor needed
   time_limit: 36000
-  model_lr: 6.12e-05
-  batch_size: 12
+  model_lr: 5e-05
+  batch_size: 8
   batch_length: 32
+
+minecraft-base:
+  step: 5000 # True limit is 2400 on env  #TODO nor needed
+  parallel: True
+  envs: 16
+  # no eval
+  eval_episode_num: 0
+  eval_every: 1e4
+  action_repeat: 1
+  train_ratio: 16
+  video_pred_log: true
+  dyn_hidden: 1024
+  dyn_deter: 4096
+  units: 1024
+  encoder: {mlp_keys: 'inventory|inventory_max|equipped|health|hunger|breath|obs_reward', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
+  decoder: {mlp_keys: 'inventory|inventory_max|equipped|health|hunger|breath', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
+  actor: {layers: 5, dist: 'onehot', std: 'none'}
+  value: {layers: 5}
+  reward_head: {layers: 5}
+  cont_head: {layers: 5}
+  imag_gradient: 'reinforce'
+  break_speed: 100.0 #TODO nor needed
+  time_limit: 36000
+  model_lr: 5e-05
+  batch_size: 8
+  batch_length: 32
+  use3dHead: False
+
 
 minecraft-native:
   step: 5000 # True limit is 1200 on env

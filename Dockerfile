@@ -34,4 +34,5 @@ RUN chmod +x /workspace/ProjectPIG/docker/entrypoint.sh \
  && chmod +x /workspace/ProjectPIG/Malmo/Minecraft/wait_for_port.sh
 
 EXPOSE 10000
+RUN chmod -R a+rwx /workspace
 ENTRYPOINT ["/workspace/ProjectPIG/docker/entrypoint.sh"]
