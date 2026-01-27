@@ -14,6 +14,7 @@ public class RewardForDistanceTraveledToCompassTargetImplementation extends Rewa
 {
     RewardForDistanceTraveledToCompassTarget params;
     double previousDistance;
+    double bestDistance;
     float totalReward;
     boolean positionInitialized;
     BlockPos prevSpawn;
@@ -37,6 +38,7 @@ public class RewardForDistanceTraveledToCompassTargetImplementation extends Rewa
 
 
         this.previousDistance = 0;
+        this.bestDistance = Double.POSITIVE_INFINITY;
         this.totalReward = 0;
         this.positionInitialized = false;
 
@@ -59,7 +61,8 @@ public class RewardForDistanceTraveledToCompassTargetImplementation extends Rewa
 
 
         float delta = !positionInitialized  ? 0.0f : (float)(this.previousDistance - currentDistance);
-        
+        float bestDelta = (!positionInitialized || currentDistance >= this.bestDistance) ? 0.0f : (float)(this.bestDistance - currentDistance);
+
         switch (this.params.getDensity()) {
         case MISSION_END:
             this.totalReward += this.params.getRewardPerBlock().floatValue() * delta;
@@ -73,6 +76,11 @@ public class RewardForDistanceTraveledToCompassTargetImplementation extends Rewa
             this.totalReward += this.params.getRewardPerBlock().floatValue() * delta;
             sendReward = true;
             break;
+        case PER_TICK_BEST:
+            this.totalReward = this.params.getRewardPerBlock().floatValue() * bestDelta;
+            sendReward = bestDelta > 0.0f;
+            if (sendReward) this.bestDistance = currentDistance;
+            break;
         default:
             break;
         }
@@ -82,8 +90,11 @@ public class RewardForDistanceTraveledToCompassTargetImplementation extends Rewa
                 this.prevSpawn.getY() != spawn.getY() ||
                 this.prevSpawn.getZ() != spawn.getZ()) {
             this.totalReward = 0;
+            this.bestDistance = Double.POSITIVE_INFINITY;
+            this.positionInitialized = false;
         } else{
             this.positionInitialized = true;
+            if (this.bestDistance == Double.POSITIVE_INFINITY) this.bestDistance = currentDistance;
         }
 
 

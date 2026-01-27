@@ -3050,6 +3050,7 @@
         </xs:annotation>
         <xs:restriction base="xs:string">
             <xs:enumeration value="PER_TICK"/>
+            <xs:enumeration value="PER_TICK_BEST"/>
             <xs:enumeration value="PER_TICK_ACCUMULATED"/>
             <xs:enumeration value="MISSION_END"/>
         </xs:restriction>

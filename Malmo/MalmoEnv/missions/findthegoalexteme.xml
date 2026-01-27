@@ -59,6 +59,7 @@
 <!--            <ContinuousMovementCommands turnSpeedDegs="180">-->
 <!--            </ContinuousMovementCommands>-->
             <HumanLevelCommands/>
+            <RewardForTimeTaken initialReward="0" delta="-0.001" density="PER_TICK_BEST"/>
             <RewardForDistanceTraveledToCompassTarget rewardPerBlock="0.05" density="PER_TICK"/>
             <RewardForTouchingBlockType>
                 <Block type="diamond_block" reward="2" behaviour="onceOnly"/>
@@ -70,10 +71,9 @@
                 <Quota commands="forward" quota="2400"/>
             </AgentQuitFromReachingCommandQuota>
             <MissionQuitCommands/>
-
-            <RewardForMissionEnd rewardForDeath="-1">
+            <RewardForMissionEnd rewardForDeath="-2.5">
                 <Reward description="found_goal" reward="0.5"/>
-<!--                <Reward description="out_of_time" reward="-0.1"/>-->
+                <Reward description="out_of_time" reward="-0.1"/>
             </RewardForMissionEnd>
         </AgentHandlers>
     </AgentSection>
